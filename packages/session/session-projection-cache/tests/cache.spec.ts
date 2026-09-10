@@ -729,4 +729,25 @@ describe('SessionProjectionCache cold-read seeding', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('cold-read write-back for "cold-fail" failed'))
     }, { timeout: 5_000 })
   })
+
+  it('deleteSession drops one session durable record and is idempotent', async () => {
+    const { ctx, root } = await harness()
+    const first = ctx.sessions.create(SessionId('delete-first'))
+    mark(first, ['a'])
+    await ctx.sessionProjectionCache.write(first)
+    const second = ctx.sessions.create(SessionId('delete-second'))
+    mark(second, ['b'])
+    await ctx.sessionProjectionCache.write(second)
+    expect(await storedRecord(root, first.id)).toBeDefined()
+    expect(await storedRecord(root, second.id)).toBeDefined()
+
+    await ctx.sessionProjectionCache.deleteSession(first.id)
+
+    expect(await storedRecord(root, first.id)).toBeUndefined()
+    // The other session's record survives.
+    expect(await storedRecord(root, second.id)).toBeDefined()
+    // Deleting an absent id (already gone, or never written) resolves.
+    await ctx.sessionProjectionCache.deleteSession(first.id)
+    await ctx.sessionProjectionCache.deleteSession(SessionId('delete-absent'))
+  })
 })

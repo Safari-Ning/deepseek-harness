@@ -11,8 +11,13 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteValue,
+  WorkspaceEmptyTrashValue,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
+  WorkspaceRestoreSessionRequest,
+  WorkspaceTrashSessionRequest,
+  WorkspaceTrashValue,
+  WorkspaceTrashEntry,
   WorkspaceValue,
   WorkspaceId,
   WorkspaceView,
@@ -29,6 +34,8 @@ export interface WorkspaceSnapshot {
   readonly items: readonly WorkspaceView[]
   /** Complete registry-global archive set in Host order. */
   readonly archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds']
+  /** Complete registry-global trash set in Host order. */
+  readonly trashedSessions: readonly WorkspaceTrashEntry[]
   readonly state: 'idle' | 'loading' | 'error'
   readonly phase: WorkspaceListPhase
   readonly error: RemoteFailure | null
@@ -46,6 +53,8 @@ export interface WorkspaceFollowSink {
   replaceOrder(workspaceIds: readonly WorkspaceId[]): void
   /** Replace the complete archived Session set. */
   replaceArchived(sessionIds: WorkspaceArchiveValue['archivedSessionIds']): void
+  /** Replace the complete trashed Session set. */
+  replaceTrashed(trashedSessions: readonly WorkspaceTrashEntry[] | undefined): void
 }
 
 /**
@@ -54,6 +63,7 @@ export interface WorkspaceFollowSink {
 export class ClientWorkspaceModel implements WorkspaceFollowSink {
   private items: readonly WorkspaceView[] = []
   private archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds'] = []
+  private trashedSessions: readonly WorkspaceTrashEntry[] = []
   private state: WorkspaceSnapshot['state'] = 'loading'
   private phase: WorkspaceListPhase = 'pending'
   private error: RemoteFailure | null = null
@@ -171,6 +181,42 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   }
 
   /**
+   * Trash one Session and install the returned complete trash set.
+   * @param sessionId - Session to trash.
+   * @returns generated Remote result.
+   */
+  async trashSession(
+    sessionId: WorkspaceTrashSessionRequest['sessionId'],
+  ): Promise<RemoteResult<WorkspaceTrashValue>> {
+    const result = await this.remote.trashSession({ sessionId })
+    if (result.ok) this.installTrashed(result.value.trashedSessions)
+    return result
+  }
+
+  /**
+   * Restore one Session from the trash and install the returned complete trash set.
+   * @param sessionId - Session to restore.
+   * @returns generated Remote result.
+   */
+  async restoreSession(
+    sessionId: WorkspaceRestoreSessionRequest['sessionId'],
+  ): Promise<RemoteResult<WorkspaceTrashValue>> {
+    const result = await this.remote.restoreSession({ sessionId })
+    if (result.ok) this.installTrashed(result.value.trashedSessions)
+    return result
+  }
+
+  /**
+   * Empty the recycle bin and install the returned trash set.
+   * @returns generated Remote result.
+   */
+  async emptyTrash(): Promise<RemoteResult<WorkspaceEmptyTrashValue>> {
+    const result = await this.remote.emptyTrash()
+    if (result.ok) this.installTrashed([])
+    return result
+  }
+
+  /**
    * Replace the projection from one complete stream-generation baseline.
    * @param baseline - complete Workspace and archive projection.
    */
@@ -178,6 +224,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     this.orderFrameGeneration++
     this.installViews(baseline.items)
     this.installArchived(baseline.archivedSessionIds)
+    this.installTrashed(baseline.trashedSessions)
     this.state = 'idle'
     this.phase = 'ready'
     this.error = null
@@ -206,6 +253,14 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
    */
   replaceArchived(archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds']): void {
     this.installArchived(archivedSessionIds)
+  }
+
+  /**
+   * Replace the trashed Session set from the current follow generation.
+   * @param trashedSessions - complete Host-confirmed trash set.
+   */
+  replaceTrashed(trashedSessions: readonly WorkspaceTrashEntry[] | undefined): void {
+    this.installTrashed(trashedSessions)
   }
 
   /** Keep the last complete projection visible while a lost carrier reconnects. */
@@ -249,10 +304,25 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     return {
       items: this.items,
       archivedSessionIds: this.archivedSessionIds,
+      trashedSessions: this.trashedSessions,
       state: this.state,
       phase: this.phase,
       error: this.error,
     }
+  }
+
+  private installTrashed(trashedSessions: readonly WorkspaceTrashEntry[] | undefined): void {
+    const entries = trashedSessions ?? []
+    if (entries.length === this.trashedSessions.length
+      && entries.every((entry, index) => {
+        const existing = this.trashedSessions[index]
+        if (existing === undefined) return false
+        return entry.sessionId === existing.sessionId
+          && entry.trashedAt === existing.trashedAt
+          && entry.workspaceId === existing.workspaceId
+      })) return
+    this.trashedSessions = [...entries]
+    this.invalidate()
   }
 
   private installArchived(archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds']): void {

@@ -345,6 +345,7 @@ describe('session.history projections block', () => {
       validateImage(): Promise<void> { return Promise.resolve() }
       saveImage(): Promise<never> { return Promise.reject(new Error('unused')) }
       readImage(): Promise<never> { return Promise.reject(new Error('unused')) }
+      async deleteUnreferenced(): Promise<number> { return 0 }
     })
     const gateway = remote(ctx)
     await new Promise(resolve => setTimeout(resolve, 0))

@@ -304,6 +304,11 @@ describe('PiAiAdapter provider routing', () => {
       ): Promise<RequestImageAttachment> {
         return readImageRequest(value, policy, signal)
       }
+
+      async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+        // No-op for test store.
+        return 0
+      }
     }
 
     const ctx = new Context()

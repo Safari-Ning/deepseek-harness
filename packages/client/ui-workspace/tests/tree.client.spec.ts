@@ -31,6 +31,7 @@ const view = (expandedGroups: readonly string[] = [], ungroupedOrder?: readonly 
   ...(ungroupedOrder === undefined ? {} : { ungroupedOrder }),
 })
 const noArchive: readonly SessionId[] = []
+const noTrash: readonly { readonly sessionId: SessionId }[] = []
 const noAttention: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
 const archived = (...ids: string[]): readonly SessionId[] => ids.map(sid)
 const schedule = (id: string, scheduledAt: string): ScheduleRecord => ({
@@ -52,7 +53,7 @@ describe('deriveGroups', () => {
   it('keeps Host Workspace and sessionIds order without Client recency sorting', () => {
     const sessions = list(summary('newer', 20), summary('older', 10))
     const workspaces = [workspace('first', ['older', 'newer']), workspace('empty', [])]
-    const groups = deriveGroups(sessions, workspaces, noArchive, noAttention, view(['first']))
+    const groups = deriveGroups(sessions, workspaces, noArchive, noTrash, noAttention, view(['first']))
     expect(groups.map(group => group.key)).toEqual(['first', 'empty'])
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([sid('older'), sid('newer')])
   })
@@ -65,7 +66,7 @@ describe('deriveGroups', () => {
       { key: 'question:1', kind: 'plan-review', sessionId: awaiting.id },
     ]])
     const grouped = deriveGroups(
-      sessions, [workspace('project', ['awaiting'])], noArchive, attention, view(['project']),
+      sessions, [workspace('project', ['awaiting'])], noArchive, noTrash, attention, view(['project']),
     )
     expect(grouped[0]!.sessions[0]).toMatchObject({ pendingInteraction: 'plan-review', running: true })
     expect(deriveFlat(sessions, noArchive, attention)[0])
@@ -88,7 +89,7 @@ describe('deriveGroups', () => {
   it('puts only real unaccounted Sessions in the trailing Ungrouped group', () => {
     const sessions = list(summary('owned', 1, '/projects/first'), summary('loose', 9, '/other'))
     const groups = deriveGroups(
-      sessions, [workspace('first', ['owned'])], noArchive, noAttention, view([UNGROUPED_KEY]),
+      sessions, [workspace('first', ['owned'])], noArchive, noTrash, noAttention, view([UNGROUPED_KEY]),
     )
     expect(groups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
     expect(groups[1]!.sessions.map(session => session.id)).toEqual([sid('loose')])
@@ -100,6 +101,7 @@ describe('deriveGroups', () => {
       sessions,
       [],
       noArchive,
+      noTrash,
       noAttention,
       view([UNGROUPED_KEY], ['two', 'stale', 'two']),
     )
@@ -118,7 +120,7 @@ describe('deriveGroups', () => {
     }
     const groups = deriveGroups(
       sessions, [workspace('first', ['shown', 'current-blank', 'stale-blank'])],
-      noArchive, noAttention, view(['first']),
+      noArchive, noTrash, noAttention, view(['first']),
     )
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([real.id, currentBlank.id])
     const blankNode = groups[0]!.sessions.find(session => session.id === currentBlank.id)!
@@ -131,7 +133,7 @@ describe('deriveGroups', () => {
     // A non-current blank stray never surfaces an Ungrouped bucket either.
     const strayGroups = deriveGroups(
       list({ ...summary('stray', 2), blank: true }),
-      [workspace('first', [])], noArchive, noAttention, view(),
+      [workspace('first', [])], noArchive, noTrash, noAttention, view(),
     )
     expect(strayGroups.map(group => group.key)).toEqual(['first'])
   })
@@ -141,7 +143,7 @@ describe('deriveGroups', () => {
     const plain = summary('plain', 2)
     const sessions = list(done, plain)
     const groups = deriveGroups(
-      sessions, [workspace('first', ['done', 'plain'])], noArchive, noAttention, view(['first']),
+      sessions, [workspace('first', ['done', 'plain'])], noArchive, noTrash, noAttention, view(['first']),
     )
     const doneNode = groups[0]!.sessions.find(session => session.id === done.id)!
     const plainNode = groups[0]!.sessions.find(session => session.id === plain.id)!
@@ -176,7 +178,7 @@ describe('deriveGroups', () => {
     ]
 
     expect(deriveGroups(
-      sessions, workspaces, noArchive, noAttention, view(['project']),
+      sessions, workspaces, noArchive, noTrash, noAttention, view(['project']),
     )[0]!.sessions.map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
     expect(deriveFlat(sessions, noArchive, noAttention)
       .map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
@@ -202,6 +204,7 @@ describe('deriveGroups', () => {
       sessions,
       [workspace('first', ['parent', 'fork', 'subagent', 'grandchild', 'fork-child'])],
       noArchive,
+      noTrash,
       noAttention,
       view(['first']),
     )
@@ -233,6 +236,7 @@ describe('deriveGroups', () => {
       list(parent, oldChild, newChild, tieB, tieA, self, orphan, cycleA, cycleB),
       [],
       noArchive,
+      noTrash,
       noAttention,
       { expandedGroups: [UNGROUPED_KEY] },
     )
@@ -245,7 +249,7 @@ describe('deriveGroups', () => {
 
     // Equal timestamps use ids as a deterministic tiebreak in either input order.
     expect(deriveGroups(
-      list(summary('tie-a', 1), summary('tie-b', 1)), [], noArchive, noAttention, view([UNGROUPED_KEY]),
+      list(summary('tie-a', 1), summary('tie-b', 1)), [], noArchive, noTrash, noAttention, view([UNGROUPED_KEY]),
     )[0]!
       .sessions.map(node => node.id)).toEqual([sid('tie-a'), sid('tie-b')])
   })
@@ -257,7 +261,7 @@ describe('deriveGroups', () => {
       byId: { [sid('present')]: summary('present', 1) },
     }
     const groups = deriveGroups(
-      partial, [workspace('project', ['missing', 'present'])], noArchive, noAttention, view(['project']),
+      partial, [workspace('project', ['missing', 'present'])], noArchive, noTrash, noAttention, view(['project']),
     )
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('present')])
   })
@@ -269,7 +273,7 @@ describe('deriveGroups', () => {
     const sessions = list(kept, gone, looseGone)
     const groups = deriveGroups(
       sessions, [workspace('first', ['kept', 'gone'])], archived('gone', 'loose-gone'),
-      noAttention, view(['first', UNGROUPED_KEY]),
+      noTrash, noAttention, view(['first', UNGROUPED_KEY]),
     )
     // The archived member drops from its group AND the archived stray never
     // surfaces an Ungrouped bucket; counts follow the visible rows.
@@ -283,13 +287,86 @@ describe('deriveGroups', () => {
     const loose = summary('loose', 2)
     const ws = workspace('project', ['owned'])
     const ownedGroups = deriveGroups(
-      { ...list(owned, loose), current: owned.id }, [ws], noArchive, noAttention, view(),
+      { ...list(owned, loose), current: owned.id }, [ws], noArchive, noTrash, noAttention, view(),
     )
     expect(ownedGroups.find(group => group.key === 'project')!.containsCurrent).toBe(true)
     const looseGroups = deriveGroups(
-      { ...list(owned, loose), current: loose.id }, [ws], noArchive, noAttention, view(),
+      { ...list(owned, loose), current: loose.id }, [ws], noArchive, noTrash, noAttention, view(),
     )
     expect(looseGroups.find(group => group.key === UNGROUPED_KEY)!.containsCurrent).toBe(true)
+  })
+
+  it('appends a trash group last when trashedSessions is non-empty', () => {
+    const s = summary('trashed', 10)
+    const groups = deriveGroups(
+      list(s), [workspace('ws', [])], noArchive,
+      [{ sessionId: sid('trashed') }],
+      noAttention, view(),
+    )
+    expect(groups.at(-1)!.key).toBe('__trash__')
+    expect(groups.at(-1)!.sessionCount).toBe(1)
+    expect(groups.at(-1)!.workspaceId).toBeUndefined()
+    expect(groups.at(-1)!.containsCurrent).toBe(false)
+  })
+
+  it('omits the trash group when trashedSessions is empty', () => {
+    const groups = deriveGroups(
+      list(summary('a', 1)), [workspace('ws', ['a'])],
+      noArchive, noTrash, noAttention, view(),
+    )
+    expect(groups.some(g => g.key === '__trash__')).toBe(false)
+  })
+
+  it('sorts trashed sessions by recency (newest first)', () => {
+    const older = summary('older', 5)
+    const newer = summary('newer', 20)
+    const groups = deriveGroups(
+      list(older, newer), [workspace('ws', [])],
+      noArchive,
+      [{ sessionId: sid('older') }, { sessionId: sid('newer') }],
+      noAttention, view(['__trash__']),
+    )
+    const trash = groups.at(-1)!
+    expect(trash.sessions.map(n => n.id)).toEqual([sid('newer'), sid('older')])
+  })
+
+  it('excludes blank and subagent sessions from the trash group', () => {
+    const blank = { ...summary('blank', 10), blank: true }
+    const subagent = { ...summary('sub', 10), origin: 'subagent' as const }
+    const normal = summary('normal', 10)
+    const groups = deriveGroups(
+      list(blank, subagent, normal), [workspace('ws', [])],
+      noArchive,
+      [{ sessionId: sid('blank') }, { sessionId: sid('sub') }, { sessionId: sid('normal') }],
+      noAttention, view(['__trash__']),
+    )
+    const trash = groups.at(-1)!
+    expect(trash.sessionCount).toBe(1)
+    expect(trash.sessions.map(n => n.id)).toEqual([sid('normal')])
+  })
+
+  it('expands trash sessions only when TRASH_KEY is in expandedGroups', () => {
+    const s = summary('trashed', 10)
+    const sessions = list(s)
+    const trashed = [{ sessionId: sid('trashed') }]
+    const collapsed = deriveGroups(sessions, [workspace('ws', [])], noArchive, trashed, noAttention, view())
+    expect(collapsed.at(-1)!.expanded).toBe(false)
+    expect(collapsed.at(-1)!.sessions).toEqual([])
+    const expanded = deriveGroups(sessions, [workspace('ws', [])], noArchive, trashed, noAttention, view(['__trash__']))
+    expect(expanded.at(-1)!.expanded).toBe(true)
+    expect(expanded.at(-1)!.sessions).toHaveLength(1)
+  })
+
+  it('skips trashed sessions missing from the session list', () => {
+    const groups = deriveGroups(
+      list(summary('present', 10)), [workspace('ws', [])],
+      noArchive,
+      [{ sessionId: sid('ghost') }, { sessionId: sid('present') }],
+      noAttention, view(['__trash__']),
+    )
+    const trash = groups.at(-1)!
+    expect(trash.sessionCount).toBe(1)
+    expect(trash.sessions.map(n => n.id)).toEqual([sid('present')])
   })
 })
 

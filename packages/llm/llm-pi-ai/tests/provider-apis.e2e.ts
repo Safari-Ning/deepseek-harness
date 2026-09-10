@@ -108,6 +108,11 @@ async function harness(image?: StoredImageAttachment): Promise<Context> {
           hasAlpha: fixture.ref.mediaType === 'image/png',
         })
       }
+
+      async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+        // No-op for test store.
+        return 0
+      }
     }
     await ctx.plugin(E2eAttachmentStore)
   }

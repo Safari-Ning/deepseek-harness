@@ -97,6 +97,11 @@ class E2eAttachmentStore extends AttachmentStore {
   ): Promise<RequestImageAttachment> {
     return Promise.resolve(this.version)
   }
+
+  async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+    // No-op for test store.
+    return 0
+  }
 }
 
 beforeEach(async () => {

@@ -1,4 +1,4 @@
-/** Workspace archive and directory UI capability. */
+/** Workspace archive, trash, and directory UI capability. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { ClientRemote, DirectoryListing, RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
@@ -12,7 +12,7 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 
-/** Workspace archive and directory operations consumed by Client UI domains. */
+/** Workspace archive, trash, and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
   /**
    * Select a Session and show its Conversation as one UI navigation action.
@@ -48,6 +48,18 @@ export interface UiWorkspace {
    * @param sessionId - Session to archive.
    */
   archiveSession(sessionId: SessionId): Promise<void>
+  /**
+   * Move a Session to the trash and clear it when it is the current selection.
+   * @param sessionId - Session to trash.
+   */
+  trashSession(sessionId: SessionId): Promise<void>
+  /**
+   * Restore a Session from the trash to its previous Workspace (or Ungrouped).
+   * @param sessionId - Session to restore.
+   */
+  restoreSession(sessionId: SessionId): Promise<void>
+  /** Permanently delete all trashed sessions, their logs, cache, and files. */
+  emptyTrash(): Promise<void>
   /**
    * Open the Host-native directory picker.
    * @returns the selected directory, or null when cancelled.
@@ -174,6 +186,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async archiveSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.archiveSession(sessionId)
+  }
+
+  async trashSession(sessionId: SessionId): Promise<void> {
+    await this.workspaces.trashSession(sessionId)
+  }
+
+  async restoreSession(sessionId: SessionId): Promise<void> {
+    await this.workspaces.restoreSession(sessionId)
+  }
+
+  async emptyTrash(): Promise<void> {
+    await this.workspaces.emptyTrash()
   }
 
   async pickDirectory(): Promise<string | null> {

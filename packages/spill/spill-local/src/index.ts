@@ -10,14 +10,16 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { gatherSweepRoots, sweepSpillRoots } from './cleanup.ts'
 import type { SweepRoot, WarnFn } from './cleanup.ts'
-import { privateRoot, saveTextFile } from './store.ts'
+import { privateRoot, saveTextFile, sessionDir } from './store.ts'
 
 export { discoverDefaultRoots, sweepSpillRoots } from './cleanup.ts'
 export type { SweepOptions, SweepRoot, WarnFn } from './cleanup.ts'
@@ -158,6 +160,10 @@ export class LocalSpillStore extends SpillStore {
       bytes: saved.bytes,
       retrievalHint: 'Use read with offset/limit, or grep this path to search within it.',
     }
+  }
+
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    await rm(sessionDir(this.root, sessionId), { recursive: true, force: true })
   }
 }
 

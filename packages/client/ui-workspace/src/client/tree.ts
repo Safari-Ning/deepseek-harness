@@ -20,6 +20,9 @@ import {
 /** Group key for Sessions outside every Workspace. */
 export const UNGROUPED_KEY = ''
 
+/** Group key for the Trash virtual group (deleted sessions awaiting permanent removal). */
+export const TRASH_KEY = '__trash__'
+
 /**
  * Resolve the Workspace browser group that owns one Session.
  * @param workspaces - authoritative Workspace membership.
@@ -146,6 +149,11 @@ function sessionVisible(session: SessionSummary, current: SessionId | undefined,
   return session.origin !== 'subagent'
     && !archived.has(session.id)
     && (!session.blank || session.id === current)
+}
+
+/** Trashed sessions are visible in the Trash group even if archived; subagent and blank sessions are excluded. */
+function trashVisible(session: SessionSummary): boolean {
+  return session.origin !== 'subagent' && !session.blank
 }
 
 /**
@@ -280,11 +288,13 @@ function sessionNode(
  * Every group shows; sessions populate under expanded groups in the selected
  * local order. Blank sessions are excluded except for the selected
  * provisional New Session row; archived sessions are excluded everywhere.
+ * Trashed sessions appear in a dedicated Trash virtual group.
  * Content search lives outside this derivation
  * (see {@link deriveSearchResults}).
  * @param list - sessions list snapshot (`current` feeds containsCurrent).
  * @param workspaces - real workspaces in stable Host order.
  * @param archivedSessionIds - registry-global archive set.
+ * @param trashedSessions - trashed session entries (from workspace controller).
  * @param pendingInteractions - pending UI interactions by Session.
  * @param view - local expansion arrays.
  * @returns group sections in render order.
@@ -293,6 +303,7 @@ export function deriveGroups(
   list: SessionListState,
   workspaces: readonly WorkspaceView[],
   archivedSessionIds: readonly SessionId[],
+  trashedSessions: readonly { readonly sessionId: SessionId }[],
   pendingInteractions: SessionPendingInteractions,
   view: TreeView,
 ): GroupNode[] {
@@ -319,6 +330,33 @@ export function deriveGroups(
         : [],
     })
   }
+
+  // Trash virtual group: sessions moved to trash, sorted by recency.
+  if (trashedSessions.length > 0) {
+    const trashMembers: SessionSummary[] = []
+    for (const entry of trashedSessions) {
+      const summary = list.byId[entry.sessionId]
+      if (summary !== undefined && trashVisible(summary)) {
+        trashMembers.push(summary)
+      }
+    }
+    trashMembers.sort(byRecency)
+    const expanded = expandedGroups.has(TRASH_KEY)
+    groups.push({
+      key: TRASH_KEY,
+      workspaceId: undefined,
+      cwd: undefined,
+      createdAt: undefined,
+      label: '',
+      sessionCount: trashMembers.length,
+      expanded,
+      containsCurrent: false,
+      sessions: expanded
+        ? trashMembers.map(session => sessionNode(session, descendants, pendingInteractions))
+        : [],
+    })
+  }
+
   return groups
 }
 

@@ -440,6 +440,17 @@ export class JsonlBackendTracker {
   }
 
   /**
+   * Whether a write claim (an open write handle or an in-flight create) is
+   * active for a session id. Permanent deletion refuses while one holds the
+   * id, so the caller disposes the owner before deleting.
+   * @param id - the session to test.
+   * @returns true while a write claim is active.
+   */
+  ownsWrite(id: SessionId): boolean {
+    return this.writers.has(id)
+  }
+
+  /**
    * The pending entry for a created-but-unmaterialized session, if any.
    * @param id - the session to look up.
    * @returns the pending header and in-memory revision.

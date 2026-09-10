@@ -86,6 +86,11 @@ class StaticAttachmentStore extends AttachmentStore {
       hasAlpha: true,
     })
   }
+
+  async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+    // No-op for test store.
+    return 0
+  }
 }
 
 const cleanups: Array<() => Promise<void>> = []

@@ -135,6 +135,16 @@ export type WorkspaceBrowserInjected = {
    */
   archiveSession: (sessionId: SessionId) => Promise<void>
   /**
+   * Move a Session to the trash: hidden from grouping surfaces, permanently
+   * deleted when the trash is emptied. Trashing the current session clears
+   * the selection into the New Session view state.
+   */
+  trashSession: (sessionId: SessionId) => Promise<void>
+  /** Restore a Session from the trash to its previous Workspace (or Ungrouped). */
+  restoreSession: (sessionId: SessionId) => Promise<void>
+  /** Permanently delete all trashed sessions, their logs, cache, and files. */
+  emptyTrash: () => Promise<void>
+  /**
    * Reorder a session inside its Workspace account (DOM-insertBefore
    * semantics: omitted anchor appends to the end). The view refreshes from
    * the Host response/changed frame; failures leave the order unchanged.

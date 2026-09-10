@@ -161,6 +161,11 @@ class TestPersistence extends SessionPersistence {
     TestPersistence.afterList?.()
     return Promise.resolve(snapshots)
   }
+
+  delete(id: SessionIdType): Promise<void> {
+    if (!TestPersistence.entries.delete(id)) return Promise.reject(new SessionPersistenceNotFoundError(id))
+    return Promise.resolve()
+  }
 }
 
 async function liveContext(config: ConstructorParameters<typeof TestSessionQueryEngine>[1] = {}): Promise<Context> {
@@ -177,7 +182,7 @@ function expectCode(code: SessionQueryErrorCode): Error {
 
 function rejectUnknown<T>(reason: unknown): Promise<T> {
   // Exercise containment for an implementation that violates the Error rejection convention.
-  return Promise.reject(reason) // oxlint-disable-line typescript/prefer-promise-reject-errors
+  return Promise.reject(reason)
 }
 
 const cancellableSessionListings = [

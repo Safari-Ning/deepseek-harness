@@ -408,6 +408,8 @@ describe('extension-less paths', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     await writeFile(join(dir, 'avatar'), PNG_1X1)
     const ctx = await setup({ attachments: false })
@@ -440,6 +442,8 @@ describe('extension-less paths', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     await writeFile(join(dir, 'sniffed'), PNG_1X1)
     const ctx = await setup({ attachments: false })
@@ -550,6 +554,8 @@ describe('argument and service preconditions', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     const ctx = await setup({ attachments: false })
     await ctx.plugin(JpegOnlyStore)
@@ -627,6 +633,8 @@ describe('image admission failures', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     await writeFile(join(dir, 'red.png'), PNG_1X1)
     const ctx = await setup({ attachments: false })
@@ -695,6 +703,8 @@ describe('image admission failures', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     await writeFile(join(dir, 'red.png'), PNG_1X1)
     const ctx = await setup({ attachments: false })
@@ -735,6 +745,8 @@ describe('image admission failures', () => {
       readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
         throw new Error('unreachable in this test')
       }
+
+      async deleteUnreferenced(): Promise<number> { return 0 }
     }
     await writeFile(join(dir, 'red.png'), PNG_1X1)
     const ctx = await setup({ attachments: false })

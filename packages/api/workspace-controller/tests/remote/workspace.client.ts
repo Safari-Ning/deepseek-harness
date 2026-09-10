@@ -14,12 +14,16 @@ import type {
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
+  WorkspaceEmptyTrashValue,
   WorkspaceFollowFrame,
   WorkspaceId,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
+  WorkspaceRestoreSessionRequest,
+  WorkspaceTrashSessionRequest,
+  WorkspaceTrashValue,
   WorkspaceValue,
   WorkspaceView,
 } from '../../src/types.ts'
@@ -58,12 +62,12 @@ export function workspace(id: string, overrides: Partial<WorkspaceView> = {}): W
 }
 
 /**
- * A baseline frame holding the named Workspaces and no archived Sessions.
+ * A baseline frame holding the named Workspaces and no archived or trashed Sessions.
  * @param ids - Workspace ids in registry order.
  * @returns the frame.
  */
 export function baseline(...ids: readonly string[]): WorkspaceBaselineFrame {
-  return { type: 'baseline', value: { items: ids.map(id => workspace(id)), archivedSessionIds: [] } }
+  return { type: 'baseline', value: { items: ids.map(id => workspace(id)), archivedSessionIds: [], trashedSessions: [] } }
 }
 
 /**
@@ -96,5 +100,12 @@ export const workspaceWorld: RemoteTable = {
       workspace: workspace(String(request.workspaceId), { sessionIds: [request.sessionId] }),
     }),
     'workspace/archiveSession': (request: WorkspaceArchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({ archivedSessionIds: [request.sessionId] }),
+    'workspace/trashSession': (request: WorkspaceTrashSessionRequest): RemoteResult<WorkspaceTrashValue> => ok({
+      trashedSessions: [{ sessionId: request.sessionId, trashedAt: '2026-01-02T00:00:00.000Z' }],
+    }),
+    'workspace/restoreSession': (_request: WorkspaceRestoreSessionRequest): RemoteResult<WorkspaceTrashValue> => ok({
+      trashedSessions: [],
+    }),
+    'workspace/emptyTrash': (): RemoteResult<WorkspaceEmptyTrashValue> => ok({ deleted: 0 }),
   },
 }

@@ -3,7 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Deque } from '@deepseek-ai/dsh-deque'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
-import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
+import type { TrashEntry, Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
   workspaceDomainState,
   workspaceRecord,
@@ -12,6 +12,7 @@ import {
 import type {
   WorkspaceBaseline,
   WorkspaceFollowFrame,
+  WorkspaceTrashEntry,
   WorkspaceView,
 } from './types.ts'
 
@@ -28,6 +29,14 @@ export function workspaceView(workspace: Workspace): WorkspaceView {
     sessionIds: [...workspace.sessionIds],
     createdAt: workspace.createdAt,
     updatedAt: workspace.updatedAt,
+  }
+}
+
+export function toTrashEntry(entry: TrashEntry): WorkspaceTrashEntry {
+  return {
+    sessionId: entry.sessionId,
+    ...(entry.workspaceId !== undefined ? { workspaceId: entry.workspaceId } : {}),
+    trashedAt: entry.trashedAt,
   }
 }
 
@@ -49,6 +58,7 @@ export class WorkspaceFeed {
   private knownIds: Set<string>
   private order: readonly string[]
   private archived: readonly string[]
+  private trashed: readonly WorkspaceTrashEntry[]
 
   /** @param ctx - Host context containing the authoritative Workspace registry. */
   constructor(private readonly ctx: Context) {
@@ -56,6 +66,7 @@ export class WorkspaceFeed {
     this.knownIds = new Set(baseline.map(workspace => String(workspace.id)))
     this.order = baseline.map(workspace => String(workspace.id))
     this.archived = ctx.workspaceRegistry.archivedSessionIds.map(String)
+    this.trashed = ctx.workspaceRegistry.trashedSessions.map(toTrashEntry)
     ctx.on('domain/changed', (change: DomainChanged) => { this.changed(change) })
     ctx.effect(() => () => {
       for (const follower of this.followers) follower.close()
@@ -65,12 +76,13 @@ export class WorkspaceFeed {
 
   /**
    * Read the complete current projection synchronously.
-   * @returns all active Workspaces and archived Session identities.
+   * @returns all active Workspaces, archived Session identities, and trashed sessions.
    */
   baseline(): WorkspaceBaseline {
     return {
       items: this.ctx.workspaceRegistry.list().map(workspaceView),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
+      trashedSessions: [...this.trashed],
     }
   }
 
@@ -115,6 +127,11 @@ export class WorkspaceFeed {
         this.archived = nextArchived
         this.publish({ type: 'archived', archivedSessionIds: [...state.archivedSessionIds] })
       }
+      const nextTrashed = (state.trashedSessions as TrashEntry[]).map(toTrashEntry)
+      if (!sameTrashEntries(this.trashed, nextTrashed)) {
+        this.trashed = nextTrashed
+        this.publish({ type: 'trashed', trashedSessions: [...nextTrashed] })
+      }
       return
     }
     if (change.table !== 'workspaces') return
@@ -137,6 +154,19 @@ export class WorkspaceFeed {
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function sameTrashEntries(
+  left: readonly WorkspaceTrashEntry[],
+  right: readonly WorkspaceTrashEntry[],
+): boolean {
+  return left.length === right.length && left.every((entry, index) => {
+    const other = right[index]
+    if (other === undefined) return false
+    return entry.sessionId === other.sessionId
+      && entry.trashedAt === other.trashedAt
+      && entry.workspaceId === other.workspaceId
+  })
 }
 
 class WorkspaceFollower {

@@ -54,6 +54,11 @@ class RecordingStore extends AttachmentStore {
     throw new Error('not used')
   }
 
+  async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+    // No-op for test stub.
+    return 0
+  }
+
   override readImageRequest(
     ref: ImageAttachmentRef,
     _policy: ImageRequestPolicy,
@@ -87,6 +92,11 @@ class UnsupportedProjectionStore extends AttachmentStore {
 
   readImage(): Promise<StoredImageAttachment> {
     throw new Error('not used')
+  }
+
+  async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+    // No-op for test stub.
+    return 0
   }
 }
 

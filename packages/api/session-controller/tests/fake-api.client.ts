@@ -165,6 +165,7 @@ export class FakeApiClient {
   workspaceBaseline: Extract<WorkspaceFollowFrame, { type: 'baseline' }>['value'] = {
     items: [],
     archivedSessionIds: [],
+    trashedSessions: [],
   }
   lastSearchSignal: AbortSignal | undefined
 
@@ -271,6 +272,21 @@ export class FakeApiClient {
           'workspace.archiveSession',
           payload,
           this.onWorkspaceArchiveSession(payload),
+        ),
+        trashSession: payload => this.record(
+          'workspace.trashSession',
+          payload,
+          Promise.resolve(ok({ trashedSessions: [] })),
+        ),
+        restoreSession: payload => this.record(
+          'workspace.restoreSession',
+          payload,
+          Promise.resolve(ok({ trashedSessions: [] })),
+        ),
+        emptyTrash: () => this.record(
+          'workspace.emptyTrash',
+          {},
+          Promise.resolve(ok({ trashedSessions: [], deleted: 0 })),
         ),
         follow: signal => this.openWorkspace(signal),
       },

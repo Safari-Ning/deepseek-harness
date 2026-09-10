@@ -12,11 +12,15 @@ import type {
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
+  WorkspaceEmptyTrashValue,
   WorkspaceFollowFrame,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
+  WorkspaceRestoreSessionRequest,
+  WorkspaceTrashSessionRequest,
+  WorkspaceTrashValue,
   WorkspaceValue,
 } from './types.ts'
 
@@ -107,6 +111,35 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('archiveSession')
   archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     return this.commands.archiveSession(request)
+  }
+
+  /**
+   * Move one Session to the recycle bin.
+   * @param request - Session identity to trash.
+   * @returns the complete resulting trash set.
+   */
+  @Remote('trashSession')
+  trashSession(request: WorkspaceTrashSessionRequest): Promise<WorkspaceTrashValue> {
+    return this.commands.trashSession(request)
+  }
+
+  /**
+   * Restore one Session from the recycle bin.
+   * @param request - Session identity to restore.
+   * @returns the complete resulting trash set.
+   */
+  @Remote('restoreSession')
+  restoreSession(request: WorkspaceRestoreSessionRequest): Promise<WorkspaceTrashValue> {
+    return this.commands.restoreSession(request)
+  }
+
+  /**
+   * Permanently delete all trashed Sessions and their derived data.
+   * @returns deletion count and emptied trash set.
+   */
+  @Remote('emptyTrash')
+  emptyTrash(): Promise<WorkspaceEmptyTrashValue> {
+    return this.commands.emptyTrash()
   }
 
   /**

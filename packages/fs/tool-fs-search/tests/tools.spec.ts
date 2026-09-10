@@ -15,6 +15,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { join, sep } from 'node:path'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session/types'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecution, type ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
@@ -177,6 +178,10 @@ class FakeSpill extends SpillStore {
       bytes: Buffer.byteLength(input.content, 'utf8'),
       retrievalHint: 'Use the fake retrieval hint.',
     })
+  }
+
+  override async deleteSession(_sessionId: SessionId): Promise<void> {
+    // No-op for test stub.
   }
 }
 

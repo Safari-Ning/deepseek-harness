@@ -107,6 +107,9 @@ function acceptIncrement(accept: WorkspaceFollowSink, frame: WorkspaceFollowIncr
     case 'archived':
       accept.replaceArchived(frame.archivedSessionIds)
       return
+    case 'trashed':
+      accept.replaceTrashed(frame.trashedSessions)
+      return
     /* v8 ignore next -- the generated Remote codec validates this closed union */
     default:
       return assertNever(frame)

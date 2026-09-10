@@ -63,6 +63,21 @@ export interface IWorkspaces {
    */
   archiveSession(sessionId: SessionId): Promise<void>
   /**
+   * Move a Session to the recycle bin, detaching it from its Workspace.
+   * @param sessionId - Session to trash.
+   */
+  trashSession(sessionId: SessionId): Promise<void>
+  /**
+   * Restore a Session from the recycle bin to its originating Workspace.
+   * @param sessionId - Session to restore.
+   */
+  restoreSession(sessionId: SessionId): Promise<void>
+  /**
+   * Permanently delete every trashed Session: logs, caches, and spills.
+   * @returns the number of sessions permanently deleted.
+   */
+  emptyTrash(): Promise<number>
+  /**
    * Move a Session within one Workspace account.
    * @param workspaceId - owning Workspace.
    * @param sessionId - Session to move.
@@ -114,6 +129,22 @@ export class WorkspaceController extends Service implements IWorkspaces {
   async archiveSession(sessionId: SessionId): Promise<void> {
     const result = await this.model.archiveSession(sessionId)
     if (!result.ok) throw commandError('session archive', result.error)
+  }
+
+  async trashSession(sessionId: SessionId): Promise<void> {
+    const result = await this.model.trashSession(sessionId)
+    if (!result.ok) throw commandError('session trash', result.error)
+  }
+
+  async restoreSession(sessionId: SessionId): Promise<void> {
+    const result = await this.model.restoreSession(sessionId)
+    if (!result.ok) throw commandError('session restore', result.error)
+  }
+
+  async emptyTrash(): Promise<number> {
+    const result = await this.model.emptyTrash()
+    if (!result.ok) throw commandError('empty trash', result.error)
+    return result.value.deleted
   }
 
   async insertSessionBefore(

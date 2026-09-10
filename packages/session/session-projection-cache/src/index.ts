@@ -375,6 +375,17 @@ export class SessionProjectionCache extends Service {
     }
   }
 
+  /**
+   * Permanently drop one session's cached projection record. Used when the
+   * owning session itself is deleted: the cache row is derived data and must
+   * not outlive its log. Idempotent — an absent row resolves without writing.
+   * @param id - the session whose cached record is removed.
+   * @returns resolution after durability.
+   */
+  async deleteSession(id: SessionId): Promise<void> {
+    await this.requireTable().delete(id)
+  }
+
   /** Replace one session's stored record with its log identity and a detached snapshot of `rows`. */
   private async put(id: SessionId, identity: CheckpointIdentity, rows: ProjectionCheckpoint): Promise<void> {
     const detached = snapshotJsonValue(rows)

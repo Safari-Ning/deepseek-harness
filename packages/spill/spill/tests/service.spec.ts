@@ -24,6 +24,10 @@ class StubStore extends SpillStore {
       retrievalHint: 'Use the stub reader.',
     }
   }
+
+  async deleteSession(_sessionId: SessionId): Promise<void> {
+    // No-op for test stub.
+  }
 }
 
 function request(content: string): SaveTextSpill {

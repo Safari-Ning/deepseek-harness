@@ -280,6 +280,10 @@ class RecordingSpill extends SpillStore {
     this.saves.push(input)
     return { locator: SpillLocator('memory:reference'), bytes: Buffer.byteLength(input.content), retrievalHint: 'Read memory:reference by lines.' }
   }
+
+  override async deleteSession(_sessionId: SessionId): Promise<void> {
+    // No-op for test stub.
+  }
 }
 
 function contextText(prepared: { additionalContext?: { content: readonly { type: string; text?: string }[] } }): string {

@@ -15,6 +15,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SaveTextSpill, SpillRef } from './types.ts'
 
 export { SpillLocator } from './types.ts'
@@ -53,6 +54,15 @@ export abstract class SpillStore extends Service {
    * @returns the saved artifact's {@link SpillRef}; rejects on a storage failure.
    */
   abstract saveText(input: SaveTextSpill): Promise<SpillRef>
+
+  /**
+   * Permanently remove every spill artifact owned by one session. Used when
+   * the owning session itself is deleted. Idempotent — a session with no
+   * spill artifacts resolves without writing.
+   * @param sessionId - the owning session whose spill artifacts are removed.
+   * @returns resolution after removal; rejects on a storage failure.
+   */
+  abstract deleteSession(sessionId: SessionId): Promise<void>
 }
 
 export default SpillStore

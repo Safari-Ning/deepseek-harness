@@ -147,6 +147,11 @@ class MemoryAttachmentStore extends AttachmentStore {
     if (stored === undefined) throw new AttachmentError('Attachment object is missing.', 'ATTACHMENT_NOT_FOUND')
     return { ref: stored.ref, data: Uint8Array.from(stored.data) }
   }
+
+  async deleteUnreferenced(_keepIds: ReadonlySet<AttachmentId>): Promise<number> {
+    // No-op for in-memory test store.
+    return 0
+  }
 }
 
 /** Scripted text response ending in a clean stop. */

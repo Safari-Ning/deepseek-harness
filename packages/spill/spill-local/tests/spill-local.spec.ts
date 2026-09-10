@@ -149,6 +149,31 @@ describe('LocalSpillStore service', () => {
     expect(ref.retrievalHint).toBe('Use read with offset/limit, or grep this path to search within it.')
   })
 
+  it('deleteSession removes every spill artifact for one session and leaves other sessions intact', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LocalSpillStore, { root, cleanupPeriodDays: 0 })
+    const first = await ctx.spillStore.saveText(request({ suggestedName: 'first.txt', content: 'one' }))
+    const second = await ctx.spillStore.saveText(request({ suggestedName: 'second.txt', content: 'two' }))
+    const other = await ctx.spillStore.saveText(request({
+      owner: { sessionId: SessionId('sess-other') },
+      suggestedName: 'other.txt',
+      content: 'three',
+    }))
+
+    await ctx.spillStore.deleteSession(SessionId('sess-1'))
+
+    expect(existsSync(first.locator)).toBe(false)
+    expect(existsSync(second.locator)).toBe(false)
+    expect(existsSync(sessionDir(root, 'sess-1'))).toBe(false)
+    // The other session's artifacts survive.
+    expect(readFileSync(other.locator, 'utf8')).toBe('three')
+    expect(existsSync(sessionDir(root, 'sess-other'))).toBe(true)
+
+    // Idempotent: deleting an already-gone session resolves.
+    await ctx.spillStore.deleteSession(SessionId('sess-1'))
+    await ctx.spillStore.deleteSession(SessionId('sess-unknown'))
+  })
+
   it('resolves a relative configured root to absolute', async () => {
     const ctx = new Context()
     await ctx.plugin(LocalSpillStore, { root: '.', cleanupPeriodDays: 0 })

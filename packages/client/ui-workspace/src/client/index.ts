@@ -126,6 +126,9 @@ export function apply(ctx: Context): void {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },
     archiveSession: async (sessionId) => { await uiWorkspace.archiveSession(sessionId) },
+    trashSession: async (sessionId) => { await uiWorkspace.trashSession(sessionId) },
+    restoreSession: async (sessionId) => { await uiWorkspace.restoreSession(sessionId) },
+    emptyTrash: async () => { await uiWorkspace.emptyTrash() },
     insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
       await workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     },

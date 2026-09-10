@@ -21,13 +21,14 @@ import { randomBytes } from 'node:crypto'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
+  type SessionPersistenceDeleteOptions,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
@@ -487,6 +488,45 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Permanently remove one stored session's entire artifact directory —
+   * every generation file and the write lease — and drop this backend's
+   * in-process bookkeeping (cold-log memo, in-flight migration preparation).
+   * Deleting an absent id resolves without writing. An id bound to an active
+   * write handle or in-flight create in this process refuses with
+   * {@link SessionAlreadyOwnedError}: dispose the owner before deleting.
+   * @param id - the stored session to delete.
+   * @param options - optional cancellation observed before backend work starts.
+   * @returns resolution once the artifact directory and bookkeeping are gone.
+   * @throws {SessionAlreadyOwnedError} when a write claim is active for the id.
+   */
+  async delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<void> {
+    options?.signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    options?.signal?.throwIfAborted()
+    if (this.tracker.ownsWrite(id)) throw new SessionAlreadyOwnedError(id)
+    const selected = await this.findLog(id, options?.signal)
+    options?.signal?.throwIfAborted()
+    if (selected === undefined) return
+    const sessionDirectory = dirname(selected.sourcePath)
+    const preparation = this.migrationPreparations.get(id)
+    this.migrationPreparations.delete(id)
+    preparation?.controller.abort()
+    this.coldLogMemo.delete(id)
+    await rm(sessionDirectory, { recursive: true, force: true })
+    options?.signal?.throwIfAborted()
+    // Prune the project directory when this session was its only occupant,
+    // so deleting a session never leaves an empty `--project--` shell behind.
+    const project = dirname(sessionDirectory)
+    try {
+      if ((await readdir(project)).length === 0) await rm(project, { recursive: true, force: true })
+    } catch (error: unknown) {
+      // A project directory already gone (or removed concurrently) is a
+      // successful prune; any other failure must surface.
+      if (!isENOENT(error)) throw error
+    }
   }
 
   // --- handle-facing storage internals (package-private via the handle class below) ---

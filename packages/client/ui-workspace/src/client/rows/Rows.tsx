@@ -10,7 +10,7 @@ import clsx from 'clsx'
 import {
   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
   IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
-  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
+  IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
   StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -377,7 +377,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false, t,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onTrash, onReveal, drag, flat = false, t,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -389,6 +389,8 @@ export function SessionNodeItem({
   onFork: (id: SessionNode['id']) => void
   /** Archive this session (row menu action; commits without a dialog). */
   onArchive: (id: SessionNode['id']) => void
+  /** Move this session to trash (row menu action; commits without a dialog). */
+  onTrash: (id: SessionNode['id']) => void
   /** Scroll this row into view after search navigation, then acknowledge it. */
   onReveal?: (() => void) | undefined
   /** Present only on draggable rows (workspace-group sessions outside search). */
@@ -412,12 +414,13 @@ export function SessionNodeItem({
   }, [onReveal])
   // Archive hides the row through the registry-global archive set and never
   // touches the session log, so it is not styled as destructive and needs no
-  // confirmation dialog.
+  // confirmation dialog. Trash moves the session to the recycle bin.
   const sessionMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
     // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
     { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    { id: 'trash', label: t('menu.trashSession'), icon: <IconTrashOutline16 />, danger: true },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
@@ -482,6 +485,7 @@ export function SessionNodeItem({
               if (id === 'rename') onRename(node.id, row.title)
               if (id === 'fork') onFork(node.id)
               if (id === 'archive') onArchive(node.id)
+              if (id === 'trash') onTrash(node.id)
             }}
             portal
             closeOnPointerLeave
@@ -509,5 +513,90 @@ export function SessionNodeItem({
       copyLabel={t('copy')}
       copiedLabel={t('hover.copied')}
     />
+  )
+}
+
+/**
+ * Trash group header: title + session count badge + empty-trash action.
+ * The trash group has no workspace backing; its label comes from the locale.
+ */
+export function TrashGroupHeader({ count, onEmptyTrash, onToggle, expanded, t }: {
+  /** Number of trashed sessions. */
+  count: number
+  /** Permanently delete all trashed sessions. */
+  onEmptyTrash: () => void
+  /** Expand/collapse the trash group. */
+  onToggle: () => void
+  /** Whether the group is currently expanded. */
+  expanded: boolean
+  t: RowTranslate
+}) {
+  return (
+    <div
+      className={css.projectRow}
+      role="treeitem"
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      <span className={clsx(css.slot, css.folder)}>
+        <IconTrashOutline16 />
+      </span>
+      <span className={clsx(css.slot, css.chevron)}>
+        <IconTriangleRightFill14 className={clsx(css.arrow, expanded && css.arrowOpen)} />
+      </span>
+      <span className={css.projectText}>
+        <span className={css.title}>{t('trash.title')}</span>
+        <span className={css.sessionCount}>{count}</span>
+      </span>
+      <span className={css.rowActions}>
+        <button
+          type="button"
+          className={css.iconButton}
+          aria-label={t('trash.empty')}
+          onClick={(e) => { e.stopPropagation(); onEmptyTrash() }}
+        >
+          <IconTrashOutline16 />
+        </button>
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Trash session row: shows the session title, trashed time, and a restore button.
+ * Trash sessions are read-only (no drag, no hover card) with a single restore action.
+ */
+export function TrashSessionRow({ node, now, onRestore, onOpen, t }: {
+  node: SessionNode
+  now: number
+  onRestore: (id: SessionNode['id']) => void
+  onOpen: (id: SessionNode['id']) => void
+  t: RowTranslate
+}) {
+  const title = displayTitle(node, t)
+  const { unit, n } = relativeTime(node.updatedAt, now)
+  const timeAgo = unit === 'now' ? t('time.now') : t('time.ago', { t: t(`time.${unit}`, { n }) })
+  return (
+    <div
+      className={clsx(css.sessionRow, css.trashSessionRow)}
+      role="treeitem"
+      onClick={() => { onOpen(node.id) }}
+    >
+      <span className={clsx(css.slot, css.status)}>
+        <SessionStatusDots statuses={[{ state: 'done', label: '' }]} />
+      </span>
+      <span className={css.sessionTitle}>{title}</span>
+      <span className={css.sessionTime}>{timeAgo}</span>
+      <span className={css.rowActions}>
+        <button
+          type="button"
+          className={css.iconButton}
+          aria-label={t('trash.restore.aria', { name: title })}
+          onClick={(e) => { e.stopPropagation(); onRestore(node.id) }}
+        >
+          <IconRefreshOutline16 />
+        </button>
+      </span>
+    </div>
   )
 }

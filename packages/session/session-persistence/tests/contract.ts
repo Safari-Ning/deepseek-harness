@@ -610,5 +610,67 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await dispose()
       }
     })
+
+    it('delete removes the session durably and refuses while a write claim holds the id', async () => {
+      const backend = await make()
+      try {
+        const m = meta('deleted', '/work')
+        const writer = await backend.persistence.create(m)
+        await writer.append(oneTurnLog())
+        // An open write handle refuses deletion: dispose the owner first.
+        await expect(backend.persistence.delete(m.id)).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
+        await writer.close()
+
+        await backend.persistence.delete(m.id)
+        expect(await backend.persistence.stat(m.id)).toBeUndefined()
+        expect((await backend.persistence.list()).map(s => s.header.id)).not.toContain(m.id)
+        await expect(backend.persistence.open(m.id, 'read')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
+
+        // Deleting an absent id resolves (idempotent).
+        await backend.persistence.delete(m.id)
+        await backend.persistence.delete(SessionId('never-existed'))
+
+        if (backend.reopen !== undefined) {
+          const reopened = await backend.reopen()
+          try {
+            expect(await reopened.persistence.stat(m.id)).toBeUndefined()
+          } finally {
+            await reopened.dispose()
+          }
+        }
+      } finally {
+        await backend.dispose()
+      }
+    })
+
+    it('delete is observed by a fresh instance after a materialized session is removed', async () => {
+      const backend = await make()
+      try {
+        if (backend.reopen === undefined) return
+        const m = meta('deleted-cross', '/work')
+        const writer = await backend.persistence.create(m)
+        await writer.append(oneTurnLog())
+        await writer.close()
+
+        // Confirm the artifact is visible to a fresh instance before deletion.
+        const pre = await backend.reopen()
+        try {
+          expect(await pre.persistence.stat(m.id)).toBeDefined()
+        } finally {
+          await pre.dispose()
+        }
+
+        await backend.persistence.delete(m.id)
+        const reopened = await backend.reopen()
+        try {
+          expect(await reopened.persistence.stat(m.id)).toBeUndefined()
+          expect((await reopened.persistence.list()).map(s => s.header.id)).not.toContain(m.id)
+        } finally {
+          await reopened.dispose()
+        }
+      } finally {
+        await backend.dispose()
+      }
+    })
   })
 }

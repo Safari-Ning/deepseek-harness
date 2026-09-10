@@ -20,7 +20,7 @@ import WorkspaceRegistry, {
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 import { defaultWorkspaceTitle, fullyQualifiedWorkspacePath } from '../src/paths.ts'
 
-const DOMAIN_VERSION = 2
+const DOMAIN_VERSION = 3
 
 const header = (id: string, cwd?: string, createdAt = 0): SessionHeader => ({
   version: SESSION_FORMAT_VERSION,
@@ -148,7 +148,7 @@ function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:0
  * Media written before archivedSessionIds existed omit the field; keeping the
  * fixtures in that shape continuously proves the schema default upgrades them.
  */
-type StoredDomainState = Omit<WorkspaceDomainState, 'archivedSessionIds'>
+type StoredDomainState = Omit<WorkspaceDomainState, 'archivedSessionIds' | 'trashedSessions'>
   & Partial<Pick<WorkspaceDomainState, 'archivedSessionIds'>>
 
 function storedPool(
@@ -201,7 +201,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     await fiber.await()
     expect(ctx.workspaceRegistry.list()).toEqual([])
     expect(list).toHaveBeenCalledTimes(1)
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], trashedSessions: [] })
   })
 
   it('bootstraps once from list headers only, in workspace/session createdAt order', async () => {
@@ -235,6 +235,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
       initialized: true,
       workspaceIds: result.registry.list().map(workspace => workspace.id),
       archivedSessionIds: [],
+      trashedSessions: [],
     })
   })
 
@@ -263,7 +264,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const second = await harness({ pool, sessions: [header('late', late, 100)] })
     expect(second.list).not.toHaveBeenCalled()
     expect(second.registry.list()).toEqual([])
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], trashedSessions: [] })
   })
 
   it('reuses partial records after a bootstrap record write fails', async () => {
@@ -517,7 +518,7 @@ describe('WorkspaceRegistry create and lookup', () => {
     await expect(result.registry.delete(workspace.id)).resolves.toBe(false)
     expect(result.registry.get(workspace.id)).toBeUndefined()
     expect(result.registry.list()).toEqual([])
-    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], trashedSessions: [] })
     expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
     await expect(realpath(dir)).resolves.toBe(dir)
     expect(result.list).toHaveBeenCalledTimes(1)
@@ -561,6 +562,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [],
       archivedSessionIds: [],
+      trashedSessions: [],
       pendingMutation: { operation: 'delete', workspaceId: workspace.id },
     })
     const reregistered = await first.registry.create(dir)
@@ -569,6 +571,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [reregistered.id],
       archivedSessionIds: [],
+      trashedSessions: [],
     })
     await first.fiber.dispose()
 
@@ -848,7 +851,7 @@ describe('header-validated membership projection', () => {
     const createRecovery = await harness({ pool: interruptedCreate })
     expect(createRecovery.registry.list()).toEqual([])
     expect(interruptedCreate.media.get('workspace')!.tables.get('workspaces')!.has(createId)).toBe(false)
-    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], trashedSessions: [] })
 
     const interruptedDelete = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -861,7 +864,7 @@ describe('header-validated membership projection', () => {
     const deleteRecovery = await harness({ pool: interruptedDelete })
     expect(deleteRecovery.registry.list()).toEqual([])
     expect(interruptedDelete.media.get('workspace')!.tables.get('workspaces')!.has(deleteId)).toBe(false)
-    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], trashedSessions: [] })
 
     const corruptPending = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -971,5 +974,128 @@ describe('registry-global session archive', () => {
     )
     const upgraded = await harness({ pool: legacy })
     expect(upgraded.registry.archivedSessionIds).toEqual([])
+  })
+})
+
+describe('registry-global session trash', () => {
+  it('trashes durably, detaches from workspace, and idempotently skips repeats', async () => {
+    const dir = await makeDir('trash-home')
+    const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })
+    const workspace = result.registry.list()[0]!
+    expect(result.registry.trashedSessions).toEqual([])
+
+    await result.registry.trashSession(SessionId('gone'))
+    expect(result.registry.trashedSessions).toHaveLength(1)
+    expect(result.registry.trashedSessions[0]!.sessionId).toBe('gone')
+    expect(result.registry.trashedSessions[0]!.workspaceId).toBe(workspace.id)
+    // Trashing detaches from workspace accounting.
+    expect(workspace.sessionIds).not.toContain('gone')
+    expect(workspace.sessionIds).toContain('kept')
+    expect(storedState(result.pool).trashedSessions).toHaveLength(1)
+
+    // Idempotent repeat.
+    const changesAfterFirst = result.changes.filter(change => change.table === '').length
+    await result.registry.trashSession(SessionId('gone'))
+    expect(result.registry.trashedSessions).toHaveLength(1)
+    expect(result.changes.filter(change => change.table === '').length).toBe(changesAfterFirst)
+  })
+
+  it('trashes unaccounted sessions with no originating workspace', async () => {
+    const dir = await makeDir('trash-strays')
+    const result = await harness({ sessions: [header('stray', dir, 100)] })
+    // Detach stray from workspace so it has no originating workspace.
+    const workspace = result.registry.list()[0]!
+    await workspace.detachSession(SessionId('stray'))
+    await result.registry.trashSession(SessionId('stray'))
+    expect(result.registry.trashedSessions).toHaveLength(1)
+    expect(result.registry.trashedSessions[0]!.workspaceId).toBeUndefined()
+  })
+
+  it('rejects unknown sessions without writing', async () => {
+    const result = await harness({ sessions: [] })
+    await expect(result.registry.trashSession(SessionId('ghost')))
+      .rejects.toThrow(/cannot trash session 'ghost'/)
+    expect(result.registry.trashedSessions).toEqual([])
+  })
+
+  it('restores to originating workspace and removes from trash', async () => {
+    const dir = await makeDir('restore-home')
+    const result = await harness({ sessions: [header('session-1', dir, 100)] })
+    const workspace = result.registry.list()[0]!
+    expect(workspace.sessionIds).toContain('session-1')
+
+    await result.registry.trashSession(SessionId('session-1'))
+    expect(workspace.sessionIds).not.toContain('session-1')
+    expect(result.registry.trashedSessions).toHaveLength(1)
+
+    await result.registry.restoreSession(SessionId('session-1'))
+    expect(result.registry.trashedSessions).toEqual([])
+    // Reattached to the originating workspace.
+    expect(workspace.sessionIds).toContain('session-1')
+  })
+
+  it('restore is idempotent for absent session', async () => {
+    const result = await harness({ sessions: [] })
+    await result.registry.restoreSession(SessionId('ghost'))
+    expect(result.registry.trashedSessions).toEqual([])
+  })
+
+  it('emptyTrash permanently deletes trashed sessions and clears the set', async () => {
+    const dir = await makeDir('empty-trash')
+    const persistenceDelete = vi.fn().mockResolvedValue(undefined)
+    const projectionDelete = vi.fn().mockResolvedValue(undefined)
+    const spillDelete = vi.fn().mockResolvedValue(undefined)
+    const result = await harness({ sessions: [header('s1', dir, 100), header('s2', dir, 200)] })
+    // Wire persistence mocks.
+    const persistence = result.ctx.get('sessionPersistence') as never as {
+      delete: typeof persistenceDelete
+      list: ReturnType<typeof vi.fn>
+      open: ReturnType<typeof vi.fn>
+    }
+    persistence.delete = persistenceDelete
+    // Provide projection cache and spill store mocks.
+    result.ctx.provide('sessionProjectionCache', { deleteSession: projectionDelete } as never)
+    result.ctx.provide('spillStore', { deleteSession: spillDelete } as never)
+
+    await result.registry.trashSession(SessionId('s1'))
+    await result.registry.trashSession(SessionId('s2'))
+    expect(result.registry.trashedSessions).toHaveLength(2)
+
+    const deleted = await result.registry.emptyTrash()
+    expect(deleted).toBe(2)
+    expect(result.registry.trashedSessions).toEqual([])
+    expect(persistenceDelete).toHaveBeenCalledWith(SessionId('s1'))
+    expect(persistenceDelete).toHaveBeenCalledWith(SessionId('s2'))
+    expect(projectionDelete).toHaveBeenCalledWith(SessionId('s1'))
+    expect(projectionDelete).toHaveBeenCalledWith(SessionId('s2'))
+    expect(spillDelete).toHaveBeenCalledWith(SessionId('s1'))
+    expect(spillDelete).toHaveBeenCalledWith(SessionId('s2'))
+  })
+
+  it('emptyTrash skips sessions with active agents', async () => {
+    const dir = await makeDir('empty-trash-active')
+    const result = await harness({ sessions: [header('s1', dir, 100)] })
+    // Provide a mock agents service with one active agent on s1.
+    result.ctx.provide('agents', {
+      list: () => [{ session: { id: SessionId('s1') } }],
+    } as never)
+
+    // trashSession checks agents, so it must be provided before trashing.
+    await expect(result.registry.trashSession(SessionId('s1')))
+      .rejects.toThrow(/cannot trash session 's1'/)
+    expect(result.registry.trashedSessions).toEqual([])
+  })
+
+  it('trashedSessions survive across registry restart', async () => {
+    const dir = await makeDir('trash-persist')
+    const pool = new MemoryMediaPool()
+    const first = await harness({ pool, sessions: [header('s1', dir, 100)] })
+    await first.registry.trashSession(SessionId('s1'))
+    expect(first.registry.trashedSessions).toHaveLength(1)
+    await first.fiber.dispose()
+
+    const second = await harness({ pool, sessions: [header('s1', dir, 100)] })
+    expect(second.registry.trashedSessions).toHaveLength(1)
+    expect(second.registry.trashedSessions[0]!.sessionId).toBe('s1')
   })
 })

@@ -109,10 +109,39 @@ export interface WorkspaceArchiveValue {
   readonly archivedSessionIds: readonly SessionId[]
 }
 
+/** Session requested for trash (deferred permanent deletion). */
+export interface WorkspaceTrashSessionRequest {
+  readonly sessionId: SessionId
+}
+
+/** One entry in the recycle bin. */
+export interface WorkspaceTrashEntry {
+  readonly sessionId: SessionId
+  /** The workspace the session belonged to before being trashed, if known. */
+  readonly workspaceId?: WorkspaceId
+  readonly trashedAt: string
+}
+
+/** Complete trashed Session set after a mutation. */
+export interface WorkspaceTrashValue {
+  readonly trashedSessions: readonly WorkspaceTrashEntry[]
+}
+
+/** Session requested for restoration from the recycle bin. */
+export interface WorkspaceRestoreSessionRequest {
+  readonly sessionId: SessionId
+}
+
+/** Receipt after emptying the recycle bin. */
+export interface WorkspaceEmptyTrashValue {
+  readonly deleted: number
+}
+
 /** Complete reconnect baseline for Workspace browser state. */
 export interface WorkspaceBaseline {
   readonly items: readonly WorkspaceView[]
   readonly archivedSessionIds: readonly SessionId[]
+  readonly trashedSessions: readonly WorkspaceTrashEntry[]
 }
 
 /** One ordered Workspace change after a generation's baseline. */
@@ -121,6 +150,7 @@ export type WorkspaceFollowIncrement =
   | { readonly type: 'remove'; readonly workspaceId: WorkspaceId }
   | { readonly type: 'order'; readonly workspaceIds: readonly WorkspaceId[] }
   | { readonly type: 'archived'; readonly archivedSessionIds: readonly SessionId[] }
+  | { readonly type: 'trashed'; readonly trashedSessions: readonly WorkspaceTrashEntry[] }
 
 /** Workspace state stream; every generation starts with exactly one baseline. */
 export type WorkspaceFollowFrame =

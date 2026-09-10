@@ -243,6 +243,7 @@ describe('WorkspaceController follow', () => {
           initialized: true,
           workspaceIds: ['missing'],
           archivedSessionIds: [],
+          trashedSessions: [],
         },
       })
     }).toThrow('references missing Workspace "missing"')
@@ -254,7 +255,7 @@ describe('WorkspaceController follow', () => {
     const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
     await expect(nextFrame(iterator)).resolves.toEqual({
       type: 'baseline',
-      value: { items: [], archivedSessionIds: [] },
+      value: { items: [], archivedSessionIds: [], trashedSessions: [] },
     })
 
     const first = await controller.create({ path: stageDir(root, 'first') })

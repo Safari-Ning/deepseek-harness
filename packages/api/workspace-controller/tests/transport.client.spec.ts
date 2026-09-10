@@ -58,6 +58,7 @@ function accepts(overrides: Partial<WorkspaceFollowSink> = {}): WorkspaceFollowS
     removeView: ignore,
     replaceOrder: ignore,
     replaceArchived: ignore,
+    replaceTrashed: ignore,
     ...overrides,
   }
 }
@@ -153,6 +154,7 @@ describe('Workspace state stream', () => {
       { type: 'remove', workspaceId: view.workspaceId },
       { type: 'order', workspaceIds: [view.workspaceId] },
       { type: 'archived', archivedSessionIds: [sid('session-one')] },
+      { type: 'trashed', trashedSessions: [{ sessionId: sid('session-two'), trashedAt: '2026-01-02T00:00:00.000Z' }] },
     ]
     mock.stream(FOLLOW, openStream([opening, ...increments]))
     const replaceBaseline = vi.fn<WorkspaceFollowSink['replaceBaseline']>()
@@ -160,20 +162,22 @@ describe('Workspace state stream', () => {
     const removeView = vi.fn<WorkspaceFollowSink['removeView']>()
     const replaceOrder = vi.fn<WorkspaceFollowSink['replaceOrder']>()
     const replaceArchived = vi.fn<WorkspaceFollowSink['replaceArchived']>()
+    const replaceTrashed = vi.fn<WorkspaceFollowSink['replaceTrashed']>()
     const stream = createWorkspaceStateStream(remote, {
-      accept: accepts({ replaceBaseline, upsertView, removeView, replaceOrder, replaceArchived }),
+      accept: accepts({ replaceBaseline, upsertView, removeView, replaceOrder, replaceArchived, replaceTrashed }),
       failed: vi.fn(),
     })
 
     stream.start()
     stream.start()
-    await vi.waitFor(() => { expect(replaceArchived).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(replaceTrashed).toHaveBeenCalledOnce() })
 
     expect(replaceBaseline).toHaveBeenCalledWith(opening.value)
     expect(upsertView).toHaveBeenCalledWith(view)
     expect(removeView).toHaveBeenCalledWith(view.workspaceId)
     expect(replaceOrder).toHaveBeenCalledWith([view.workspaceId])
     expect(replaceArchived).toHaveBeenCalledWith(['session-one'])
+    expect(replaceTrashed).toHaveBeenCalledWith([{ sessionId: sid('session-two'), trashedAt: '2026-01-02T00:00:00.000Z' }])
     await stream.dispose()
     expect(streamStates(mock)).toEqual(['cancelled'])
   })
@@ -309,7 +313,7 @@ describe('WorkspaceController', () => {
   it('publishes the model source and exposes successful Workspace commands', async ({ mock, start }) => {
     const { remote, client } = await gatewayClient(mock, start)
     const model = new ClientWorkspaceModel(remote.workspace)
-    model.replaceBaseline({ items: [workspace('one')], archivedSessionIds: [] })
+    model.replaceBaseline({ items: [workspace('one')], archivedSessionIds: [], trashedSessions: [] })
     const controller = new WorkspaceController(client.ctx, model)
 
     expect(controller.list).toBe(model)
@@ -321,6 +325,9 @@ describe('WorkspaceController', () => {
       sessionIds: ['session'],
     })
     await expect(controller.archiveSession(sid('session'))).resolves.toBeUndefined()
+    await expect(controller.trashSession(sid('session'))).resolves.toBeUndefined()
+    await expect(controller.restoreSession(sid('session'))).resolves.toBeUndefined()
+    await expect(controller.emptyTrash()).resolves.toBe(0)
     await expect(controller.delete(wid('one'))).resolves.toBeUndefined()
     // Each command crosses the wire as one positional request object.
     expect(mock.log.requests('workspace/create')).toEqual([{ path: '/work/created' }])
@@ -328,6 +335,9 @@ describe('WorkspaceController', () => {
     expect(mock.log.requests('workspace/insertBefore')).toEqual([{ workspaceId: 'one' }])
     expect(mock.log.requests('workspace/insertSessionBefore')).toEqual([{ workspaceId: 'one', sessionId: 'session' }])
     expect(mock.log.requests('workspace/archiveSession')).toEqual([{ sessionId: 'session' }])
+    expect(mock.log.requests('workspace/trashSession')).toEqual([{ sessionId: 'session' }])
+    expect(mock.log.requests('workspace/restoreSession')).toEqual([{ sessionId: 'session' }])
+    expect(mock.log.requests('workspace/emptyTrash')).toEqual([{}])
     expect(mock.log.requests('workspace/delete')).toEqual([{ workspaceId: 'one' }])
   })
 
@@ -351,6 +361,15 @@ describe('WorkspaceController', () => {
     mock.remote.workspace.archiveSession.mockResolvedValueOnce(err(missingSession))
     await expect(controller.archiveSession(sid('session')))
       .rejects.toThrow('workspace session archive failed: session/not-found: missing session')
+    mock.remote.workspace.trashSession.mockResolvedValueOnce(err(missingSession))
+    await expect(controller.trashSession(sid('session')))
+      .rejects.toThrow('workspace session trash failed: session/not-found: missing session')
+    mock.remote.workspace.restoreSession.mockResolvedValueOnce(err(missingSession))
+    await expect(controller.restoreSession(sid('session')))
+      .rejects.toThrow('workspace session restore failed: session/not-found: missing session')
+    mock.remote.workspace.emptyTrash.mockResolvedValueOnce(err(missingSession))
+    await expect(controller.emptyTrash())
+      .rejects.toThrow('workspace empty trash failed: session/not-found: missing session')
     mock.remote.workspace.insertSessionBefore.mockResolvedValueOnce(err(new RemoteError(
       'workspace/move-invalid', 'invalid move', { workspaceId: wid('missing'), sessionId: sid('session') },
     )))

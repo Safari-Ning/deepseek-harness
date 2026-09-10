@@ -142,4 +142,23 @@ export class TestWorkspaces implements IWorkspaces {
       draft.archivedSessionIds = [...draft.archivedSessionIds, sessionId]
     })
   }
+
+  async trashSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'trashSession', args: [sessionId] })
+    const stub = this.stubs.get('trashSession')
+    if (stub !== undefined) return await (stub(sessionId) as Promise<void>)
+  }
+
+  async restoreSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'restoreSession', args: [sessionId] })
+    const stub = this.stubs.get('restoreSession')
+    if (stub !== undefined) return await (stub(sessionId) as Promise<void>)
+  }
+
+  async emptyTrash(): Promise<number> {
+    this.calls.push({ method: 'emptyTrash', args: [] })
+    const stub = this.stubs.get('emptyTrash')
+    if (stub !== undefined) return await (stub() as Promise<number>)
+    return 0
+  }
 }

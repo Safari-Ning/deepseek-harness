@@ -196,6 +196,23 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Permanently remove one stored session and every artifact the backend keeps
+   * for it. After resolution the id is absent from `stat`/`list`/`open`.
+   * Deleting an absent id resolves without writing (idempotent).
+   * @param id - the stored session to delete.
+   * @param options - optional cancellation observed before backend work starts.
+   * @throws {SessionAlreadyOwnedError} when a write handle is open for the
+   *   session in this process; dispose the owner before deleting.
+   */
+  abstract delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<void>
+}
+
+/** Options for {@link SessionPersistence.delete}. */
+export interface SessionPersistenceDeleteOptions {
+  /** Optional cancellation observed before backend work starts. */
+  readonly signal?: AbortSignal
 }
 
 export default SessionPersistence

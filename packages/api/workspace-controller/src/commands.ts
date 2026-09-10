@@ -1,15 +1,18 @@
 /** Workspace command implementation and stable Remote failure mapping. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
+  WorkspaceTrashUnknownSessionError,
   WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
-import { workspaceView } from './feed.ts'
+import { toTrashEntry, workspaceView } from './feed.ts'
 import type {
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
@@ -17,10 +20,14 @@ import type {
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
+  WorkspaceEmptyTrashValue,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
+  WorkspaceRestoreSessionRequest,
+  WorkspaceTrashSessionRequest,
+  WorkspaceTrashValue,
   WorkspaceValue,
 } from './types.ts'
 
@@ -160,6 +167,51 @@ export class WorkspaceCommands {
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
 
+  /**
+   * Move one Session to the recycle bin, detaching it from its Workspace.
+   * @param request - Session identity to trash.
+   * @returns the complete resulting trash set.
+   */
+  async trashSession(request: WorkspaceTrashSessionRequest): Promise<WorkspaceTrashValue> {
+    try {
+      await this.ctx.workspaceRegistry.trashSession(request.sessionId)
+    } catch (error) {
+      if (!(error instanceof WorkspaceTrashUnknownSessionError)) throw error
+      throw new RemoteError('session/not-found', error.message, { sessionId: request.sessionId }, { cause: error })
+    }
+    return { trashedSessions: this.ctx.workspaceRegistry.trashedSessions.map(toTrashEntry) }
+  }
+
+  /**
+   * Restore one Session from the recycle bin to its originating Workspace.
+   * @param request - Session identity to restore.
+   * @returns the complete resulting trash set.
+   */
+  async restoreSession(request: WorkspaceRestoreSessionRequest): Promise<WorkspaceTrashValue> {
+    await this.ctx.workspaceRegistry.restoreSession(request.sessionId)
+    return { trashedSessions: this.ctx.workspaceRegistry.trashedSessions.map(toTrashEntry) }
+  }
+
+  /**
+   * Permanently delete every trashed Session: logs, caches, and spills.
+   * After deletion, performs attachment garbage collection for remaining sessions.
+   * @returns the number of sessions permanently deleted.
+   */
+  async emptyTrash(): Promise<WorkspaceEmptyTrashValue> {
+    // Collect remaining session IDs before deletion (trashed sessions are not in workspaces).
+    const remainingSessionIds = collectRemainingSessionIds(this.ctx.workspaceRegistry)
+    const deleted = await this.ctx.workspaceRegistry.emptyTrash()
+    // Perform attachment GC if the attachment service is available.
+    if (deleted > 0) {
+      const attachments = this.ctx.get('attachments')
+      if (attachments !== undefined) {
+        const keep = await collectAttachmentRefs(this.ctx, remainingSessionIds)
+        await attachments.deleteUnreferenced(keep)
+      }
+    }
+    return { deleted }
+  }
+
   private requireWorkspace(workspaceId: WorkspaceId): Workspace {
     const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
     if (workspace === undefined) throw workspaceNotFound(workspaceId)
@@ -183,4 +235,91 @@ function workspaceNotFound(workspaceId: WorkspaceId): RemoteError<'workspace/not
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Collect all session IDs from all workspaces (remaining after trash deletion). */
+function collectRemainingSessionIds(registry: { list(): Workspace[] }): Set<SessionId> {
+  const ids = new Set<SessionId>()
+  for (const workspace of registry.list()) {
+    for (const id of workspace.sessionIds) {
+      ids.add(id)
+    }
+  }
+  return ids
+}
+
+/** Scan session logs for attachment references and return the union of all referenced IDs. */
+async function collectAttachmentRefs(
+  ctx: Context,
+  sessionIds: ReadonlySet<SessionId>,
+): Promise<ReadonlySet<AttachmentId>> {
+  const keep = new Set<AttachmentId>()
+  const persistence = ctx.get('sessionPersistence')
+  if (persistence === undefined) return keep
+  for (const id of sessionIds) {
+    let handle
+    try {
+      handle = await persistence.open(id, 'read')
+    } catch {
+      continue
+    }
+    try {
+      const { events } = await handle.read(0)
+      for (const event of events) {
+        scanEventForAttachmentRefs(event, keep)
+      }
+    } catch {
+      // Skip unreadable sessions.
+    } finally {
+      await handle[Symbol.asyncDispose]()
+    }
+  }
+  return keep
+}
+
+/** Scan a single session event for attachment ID references. */
+function scanEventForAttachmentRefs(event: unknown, keep: Set<AttachmentId>): void {
+  const data = (event as { data?: unknown }).data
+  if (typeof data !== 'object' || data === null) return
+  const carrier = data as {
+    content?: unknown
+    message?: { content?: unknown }
+    inserted?: Array<{ content?: unknown }>
+    stream?: Array<{ type?: unknown; chunk?: { type?: unknown; block?: unknown } }>
+  }
+  scanContentForAttachmentRefs(carrier.content, keep)
+  if (carrier.message !== undefined) scanContentForAttachmentRefs(carrier.message.content, keep)
+  if (carrier.inserted !== undefined) {
+    for (const message of carrier.inserted) scanContentForAttachmentRefs(message.content, keep)
+  }
+  if (carrier.stream !== undefined) {
+    for (const record of carrier.stream) {
+      if (record.type === 'chunk' && record.chunk?.type === 'block-end') {
+        scanContentForAttachmentRefs([record.chunk.block], keep)
+      }
+    }
+  }
+}
+
+/** Recursively scan content blocks for attachment references. */
+function scanContentForAttachmentRefs(content: unknown, keep: Set<AttachmentId>): void {
+  if (!Array.isArray(content)) return
+  const pending: unknown[] = []
+  for (const item of content) pending.push(item)
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const block = value as { type?: unknown; attachment?: unknown; content?: unknown }
+    if (block.type === 'image' && typeof block.attachment === 'object' && block.attachment !== null) {
+      const ref = block.attachment as { attachmentId?: unknown }
+      if (typeof ref.attachmentId === 'string') keep.add(ref.attachmentId as AttachmentId)
+    }
+    if (block.type === 'file' && typeof block.attachment === 'object' && block.attachment !== null) {
+      const ref = block.attachment as { attachmentId?: unknown }
+      if (typeof ref.attachmentId === 'string') keep.add(ref.attachmentId as AttachmentId)
+    }
+    if (Array.isArray(block.content)) {
+      for (const item of block.content) pending.push(item)
+    }
+  }
 }

@@ -17,7 +17,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-
 describe('render branch tails', () => {
   it('AssistantMarkdown reasoning row is ok-state when not the streaming tail', () => {
     const view = render(

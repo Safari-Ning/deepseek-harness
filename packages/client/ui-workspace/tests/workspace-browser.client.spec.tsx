@@ -55,7 +55,8 @@ const workspace = (id: string, sessionIds: string[], title = id): WorkspaceView 
 const workspaceState = (
   items: readonly WorkspaceView[],
   archivedSessionIds: readonly SessionId[] = [],
-): WorkspaceSnapshot => ({ items, archivedSessionIds, state: 'idle', phase: 'ready', error: null })
+  trashedSessions: readonly { readonly sessionId: SessionId; readonly trashedAt: string }[] = [],
+): WorkspaceSnapshot => ({ items, archivedSessionIds, trashedSessions, state: 'idle', phase: 'ready', error: null })
 const noPendingInteraction: SessionPendingInteractionSnapshot = new Map()
 function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
@@ -93,6 +94,9 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     archiveSession: vi.fn(async () => {}),
+    trashSession: vi.fn(async () => {}),
+    restoreSession: vi.fn(async () => {}),
+    emptyTrash: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     insertSessionBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
@@ -1496,5 +1500,69 @@ describe('WorkspaceBrowser', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索会话…'), { target: { value: 'needle' } })
     const row = screen.getByText('Needle A').closest('[role="treeitem"]') as HTMLElement
     expect(row.hasAttribute('draggable')).toBe(false)
+  })
+
+  describe('trash', () => {
+    it('renders a trash group header when trashedSessions has entries', () => {
+      const s = summary('trashed-1', 10, { displayTitle: 'Trashed Session' })
+      mount({
+        useSessions: hook(sessionState([s])),
+        useWorkspaces: hook(workspaceState(
+          [workspace('ws', [])],
+          [],
+          [{ sessionId: sid('trashed-1'), trashedAt: '2026-01-01T00:00:00.000Z' }],
+        )),
+      })
+      expect(screen.getByText('回收站')).toBeTruthy()
+      expect(screen.getByText('1')).toBeTruthy()
+    })
+
+    it('does not render a trash group when trashedSessions is empty', () => {
+      mount({
+        useSessions: hook(sessionState([summary('active', 10)])),
+        useWorkspaces: hook(workspaceState([workspace('ws', ['active'])])),
+      })
+      expect(screen.queryByText('回收站')).toBeNull()
+    })
+
+    it('restores a session when the restore button is clicked', async () => {
+      const restoreSession = vi.fn(async () => {})
+      // Use Rows.TrashSessionRow directly to verify the restore callback wiring
+      const { TrashSessionRow } = await import('../src/client/rows/Rows.tsx')
+      const node = { id: sid('trashed-1'), title: 'My Session', blank: false, running: false, runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 10 }
+      render(<div role="tree"><TrashSessionRow node={node} now={20} onRestore={restoreSession} onOpen={vi.fn()} t={t} /></div>)
+      fireEvent.click(screen.getByRole('button', { name: '恢复会话"My Session"' }))
+      expect(restoreSession).toHaveBeenCalledWith(sid('trashed-1'))
+    })
+
+    it('empties the trash when the empty button is clicked', async () => {
+      const emptyTrash = vi.fn(async () => {})
+      const s = summary('trashed-1', 10)
+      mount({
+        useSessions: hook(sessionState([s])),
+        useWorkspaces: hook(workspaceState(
+          [workspace('ws', [])],
+          [],
+          [{ sessionId: sid('trashed-1'), trashedAt: '2026-01-01T00:00:00.000Z' }],
+        )),
+        emptyTrash,
+      })
+      fireEvent.click(screen.getByRole('button', { name: '清空回收站' }))
+      expect(emptyTrash).toHaveBeenCalledOnce()
+    })
+
+    it('shows a trash menu item on normal session rows', () => {
+      const trashSession = vi.fn(async () => {})
+      const s = summary('active', 10, { displayTitle: 'Active Session' })
+      mount({
+        useSessions: hook(sessionState([s])),
+        useWorkspaces: hook(workspaceState([workspace('ws', ['active'])])),
+        trashSession,
+      })
+      fireEvent.click(screen.getByText('ws'))
+      fireEvent.click(screen.getByRole('button', { name: '会话“Active Session”的操作' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '移入回收站' }))
+      expect(trashSession).toHaveBeenCalledWith(sid('active'))
+    })
   })
 })

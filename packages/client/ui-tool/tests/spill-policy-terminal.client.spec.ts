@@ -29,6 +29,8 @@ class MemorySpillStore extends SpillStore {
       bytes: bytes.length,
     }
   }
+
+  async deleteSession(_sessionId: SessionId): Promise<void> {}
 }
 
 const shellArgs = { command: 'fixture-output', description: 'Return shell output fixture' }

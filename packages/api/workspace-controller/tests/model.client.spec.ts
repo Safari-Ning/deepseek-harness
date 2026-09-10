@@ -9,11 +9,15 @@ import type {
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
+  WorkspaceEmptyTrashValue,
   WorkspaceFollowFrame,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
+  WorkspaceRestoreSessionRequest,
+  WorkspaceTrashSessionRequest,
+  WorkspaceTrashValue,
   WorkspaceValue,
   WorkspaceId,
   WorkspaceView,
@@ -115,6 +119,21 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     return this.onArchiveSession(request)
   }
 
+  trashSession(request: WorkspaceTrashSessionRequest): Promise<RemoteResult<WorkspaceTrashValue>> {
+    this.record('trashSession', request)
+    return Promise.resolve(remoteOk({ trashedSessions: [{ sessionId: request.sessionId, trashedAt: new Date().toISOString() }] }))
+  }
+
+  restoreSession(request: WorkspaceRestoreSessionRequest): Promise<RemoteResult<WorkspaceTrashValue>> {
+    this.record('restoreSession', request)
+    return Promise.resolve(remoteOk({ trashedSessions: [] }))
+  }
+
+  emptyTrash(): Promise<RemoteResult<WorkspaceEmptyTrashValue>> {
+    this.record('emptyTrash', {})
+    return Promise.resolve(remoteOk({ trashedSessions: [], deleted: 0 }))
+  }
+
   async *follow(_signal?: AbortSignal): AsyncGenerator<WorkspaceFollowFrame> {}
 
   private record(method: string, request: unknown): void {
@@ -131,7 +150,7 @@ function baseline(
   items: readonly WorkspaceView[] = [],
   archivedSessionIds: readonly SessionId[] = [],
 ): void {
-  model.replaceBaseline({ items, archivedSessionIds })
+  model.replaceBaseline({ items, archivedSessionIds, trashedSessions: [] })
 }
 
 describe('ClientWorkspaceModel', () => {

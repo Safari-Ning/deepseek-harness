@@ -85,7 +85,6 @@ function stubPersistence(
     hooks.onStat?.()
     if (hooks.statFailure !== undefined) {
       // Exercise containment of a backend violating the Error rejection convention.
-      // oxlint-disable-next-line typescript/prefer-promise-reject-errors
       return Promise.reject(hooks.statFailure)
     }
     if (entry === undefined) return Promise.resolve(undefined)
@@ -112,7 +111,6 @@ function stubPersistence(
         void options
         hooks.onRead?.()
         if (hooks.readFailure !== undefined) {
-          // oxlint-disable-next-line typescript/prefer-promise-reject-errors
           return Promise.reject(hooks.readFailure)
         }
         const events = structuredClone(entry.events)
@@ -508,6 +506,10 @@ describe('SessionObservationReader cold path', () => {
 
       list(): Promise<readonly SessionPersistenceSnapshot[]> {
         return Promise.resolve([])
+      }
+
+      delete(): Promise<void> {
+        return Promise.reject(new Error('not used'))
       }
     }
 

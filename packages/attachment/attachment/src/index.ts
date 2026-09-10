@@ -6,6 +6,7 @@ import { AttachmentError, isAttachmentError as matchesAttachmentError } from './
 import type {
   AdmittedPromptContentPart,
   AttachmentAdmissionPart,
+  AttachmentId,
   EncodedFileAttachment,
   FileAttachmentRef,
   ImageAttachmentLimits,
@@ -258,6 +259,20 @@ export abstract class AttachmentStore extends Service {
       'ATTACHMENT_PROJECTION_UNSUPPORTED',
     ))
   }
+
+  /**
+   * Permanently remove every stored object whose content-addressed id is
+   * absent from `keep`, including their derived request-image caches and file
+   * display-name aliases. Content-addressed objects are shared across
+   * sessions, so callers build `keep` as the union of ids referenced by every
+   * session that must remain readable (typically by scanning session logs)
+   * and call this once after deleting the removed sessions' logs. Idempotent:
+   * an empty or unchanged store resolves without writing.
+   * @param keep - content-addressed ids that must survive; anything else is garbage.
+   * @param signal - optional cancellation for the enumeration and removal work.
+   * @returns the number of objects removed.
+   */
+  abstract deleteUnreferenced(keep: ReadonlySet<AttachmentId>, signal?: AbortSignal): Promise<number>
 
 }
 

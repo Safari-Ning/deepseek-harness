@@ -5,6 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type {
+  AttachmentId,
   FileAttachmentRef,
   ImageAttachmentLimits,
   ImageAttachmentRef,
@@ -16,6 +17,7 @@ import type {
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import { dshCachePath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { deleteUnreferenced as collectGarbage } from './gc.ts'
 import type { NormalizationPolicy } from './normalization.ts'
 import { CompressionLimiter, compressionFailure } from './compression-limiter.ts'
 import { commitPreparedImageFile, normalizedImagePath, prepareImageFile, readImageFile, validateImageFile } from './store.ts'
@@ -29,6 +31,7 @@ export type { NormalizedImage, NormalizationPolicy } from './normalization.ts'
 export { commitPreparedImageFile, prepareImageFile, readImageFile, saveImageFile, validateImageFile } from './store.ts'
 export type { PreparedImageFile } from './store.ts'
 export { readRequestImageFile, requestImageVariantId } from './request-image.ts'
+export { deleteUnreferenced } from './gc.ts'
 
 /** Default maximum encoded bytes for one submitted image; oversized sources are refused, not shrunk. */
 export const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -251,6 +254,13 @@ export class LocalAttachmentStore extends AttachmentStore {
     signal?: AbortSignal,
   ): Promise<RequestImageAttachment> {
     return this.requestVersion(ref, policy, undefined, signal)
+  }
+
+  override deleteUnreferenced(
+    keep: ReadonlySet<AttachmentId>,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    return collectGarbage(this.root, keep, signal)
   }
 
   private requestVersion(

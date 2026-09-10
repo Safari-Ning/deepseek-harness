@@ -42,6 +42,10 @@ class StubStore extends SpillStore {
       retrievalHint: 'Use the stub retrieval path.',
     }
   }
+
+  async deleteSession(_sessionId: SessionId): Promise<void> {
+    // No-op for test stub.
+  }
 }
 
 /** A tool returning `text` verbatim (name configurable so we can register `read`). */

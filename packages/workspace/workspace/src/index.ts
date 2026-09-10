@@ -17,12 +17,12 @@ import type { WorkspaceEntityHost } from './entity.ts'
 export { WorkspaceMoveInvalidError } from './entity.ts'
 import { defaultWorkspaceTitle, realpathNormalize } from './paths.ts'
 import { workspaceDomainSpec } from './spec.ts'
-import type { WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
+import type { TrashEntry, WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
 import type { Workspace, WorkspaceId as WorkspaceIdBrand } from './types.ts'
 
 export type { Workspace } from './types.ts'
 export { workspaceDomainState, workspaceRecord, workspaceDomainSpec } from './spec.ts'
-export type { WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
+export type { TrashEntry, WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
 export { realpathNormalize } from './paths.ts'
 
 /** Identifies one workspace record (see `src/types.ts` for the brand rationale). */
@@ -48,6 +48,20 @@ export class WorkspaceUnknownSessionError extends Error {
   constructor(readonly sessionId: SessionId) {
     super(`cannot archive session '${sessionId}': live sessions and session persistence hold no such session`)
     this.name = 'WorkspaceUnknownSessionError'
+  }
+}
+
+/**
+ * A trashSession request named a session neither live nor in session
+ * persistence — a definite miss only; storage faults propagate as themselves.
+ */
+export class WorkspaceTrashUnknownSessionError extends Error {
+  /**
+   * @param sessionId - The unknown session id.
+   */
+  constructor(readonly sessionId: SessionId) {
+    super(`cannot trash session '${sessionId}': session persistence holds no such session`)
+    this.name = 'WorkspaceTrashUnknownSessionError'
   }
 }
 
@@ -254,6 +268,146 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * The registry-global trash set: sessions detached from workspace accounting
+   * and marked for deferred permanent deletion. Trashed sessions retain their
+   * originating workspace id so restore can reattach to the original position.
+   * @returns the trashed session entries in trash order.
+   */
+  get trashedSessions(): readonly TrashEntry[] {
+    return this.requireState().trashedSessions as TrashEntry[]
+  }
+
+  /**
+   * Move one session to the recycle bin. The session must exist (live or in
+   * session persistence); it must not already be trashed; and it must not
+   * currently be running. The session is removed from its workspace's
+   * accounting (if any) and its workspace position is recorded so restore can
+   * reattach it. An already-trashed id resolves without writing.
+   * @param sessionId - The session to trash.
+   * @param workspaceRegistry - the registry itself (for self-reference in enqueued ops).
+   * @returns resolution after durability.
+   */
+  trashSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      if (state.trashedSessions.some(entry => entry.sessionId === sessionId)) return
+      // Refuse to trash a session with an active agent.
+      const agents = this.ctx.get('agents')
+      if (agents !== undefined) {
+        for (const agent of agents.list()) {
+          if (agent.session.id === sessionId) {
+            throw new Error(`cannot trash session '${sessionId}': an agent is still active on it`)
+          }
+        }
+      }
+      if (!(await this.sessionKnown(sessionId))) {
+        throw new WorkspaceTrashUnknownSessionError(sessionId)
+      }
+      // Find the originating workspace.
+      let originWorkspaceId: WorkspaceId | undefined
+      for (const entity of this.entities.values()) {
+        const record = this.requireTable().get(entity.id) as WorkspaceRecord
+        if (record.sessionIds.indexOf(sessionId) !== -1) {
+          originWorkspaceId = entity.id
+          break
+        }
+      }
+      // Detach from workspace accounting.
+      if (originWorkspaceId !== undefined) {
+        const entity = this.entities.get(originWorkspaceId)
+        if (entity !== undefined) {
+          await entity.detachSession(sessionId)
+        }
+      }
+      const entry: TrashEntry = {
+        sessionId,
+        workspaceId: originWorkspaceId ?? undefined,
+        trashedAt: new Date().toISOString(),
+      }
+      await this.setState({ ...this.requireState(), trashedSessions: [...state.trashedSessions, entry] })
+    })
+  }
+
+  /**
+   * Restore one session from the recycle bin to its originating workspace (if
+   * it still exists and owns the path). The session is removed from the trash
+   * set and reattached to the originating workspace's accounting at its
+   * previous position (or appended if the position no longer exists). A
+   * session absent from the trash set resolves without writing.
+   * @param sessionId - The session to restore.
+   * @returns resolution after durability.
+   */
+  restoreSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      const entry = state.trashedSessions.find(e => e.sessionId === sessionId)
+      if (entry === undefined) return
+      // Remove from trash.
+      const nextTrashed = state.trashedSessions.filter(e => e !== entry)
+      await this.setState({ ...state, trashedSessions: nextTrashed })
+      // Reattach to originating workspace if it still exists.
+      if (entry.workspaceId !== undefined) {
+        const entity = this.entities.get(entry.workspaceId)
+        if (entity !== undefined) {
+          await entity.attachSession(sessionId)
+        }
+      }
+    })
+  }
+
+  /**
+   * Permanently delete every trashed session: their session logs, projection
+   * cache rows, and spill artifacts. After completion the trash set is empty.
+   * Sessions that are live (running) are skipped; their entries remain in the
+   * trash for a subsequent attempt. Attachment GC is not performed here —
+   * callers with access to the attachment store should perform attachment
+   * garbage collection before or after calling this method.
+   * @returns the number of sessions permanently deleted.
+   */
+  emptyTrash(): Promise<number> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      const remaining: TrashEntry[] = []
+      let deleted = 0
+      const persistence = this.ctx.get('sessionPersistence')
+      const projectionCache = this.ctx.get('sessionProjectionCache')
+      const spillStore = this.ctx.get('spillStore')
+      for (const entry of state.trashedSessions) {
+        // Skip sessions with active agents.
+        const agents = this.ctx.get('agents')
+        let isActive = false
+        if (agents !== undefined) {
+          for (const agent of agents.list()) {
+            if (agent.session.id === entry.sessionId) {
+              isActive = true
+              break
+            }
+          }
+        }
+        if (isActive) {
+          remaining.push(entry as TrashEntry)
+          continue
+        }
+        try {
+          if (persistence !== undefined) await persistence.delete(entry.sessionId)
+          if (projectionCache !== undefined) await projectionCache.deleteSession(entry.sessionId)
+          if (spillStore !== undefined) await spillStore.deleteSession(entry.sessionId)
+          deleted++
+        } catch (error) {
+          this.ctx.logger.warn(
+            `failed to permanently delete trashed session '${entry.sessionId}': ${String(error)}`,
+          )
+          remaining.push(entry as TrashEntry)
+        }
+      }
+      if (deleted > 0) {
+        await this.setState({ ...this.requireState(), trashedSessions: remaining })
+      }
+      return deleted
+    })
+  }
+
+  /**
    * Whether a session is live, header-indexed, or present in a fresh
    * persistence listing. Only a definite miss returns false — a failing
    * `sessionPersistence.list()` propagates so storage faults never
@@ -330,6 +484,7 @@ export class WorkspaceRegistry extends Service {
         initialized: true,
         workspaceIds: [id, ...state.workspaceIds],
         archivedSessionIds: state.archivedSessionIds,
+        trashedSessions: state.trashedSessions,
       })
     } catch (error) {
       this.entities.delete(id)
@@ -362,6 +517,7 @@ export class WorkspaceRegistry extends Service {
       initialized: true,
       workspaceIds: state.workspaceIds.filter(workspaceId => workspaceId !== id),
       archivedSessionIds: state.archivedSessionIds,
+      trashedSessions: state.trashedSessions,
     }
     await this.setState({
       ...nextState,
@@ -419,6 +575,7 @@ export class WorkspaceRegistry extends Service {
       initialized: state.initialized,
       workspaceIds: state.workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
+      trashedSessions: state.trashedSessions,
     })
   }
 
@@ -500,10 +657,15 @@ export class WorkspaceRegistry extends Service {
       })
       .map(([id]) => id)
 
-    if (!sameIds(state.workspaceIds, workspaceIds)) {
-      await this.setState({ initialized: false, workspaceIds, archivedSessionIds: state.archivedSessionIds })
+    const restState = {
+      workspaceIds,
+      archivedSessionIds: state.archivedSessionIds,
+      trashedSessions: state.trashedSessions,
     }
-    await this.setState({ initialized: true, workspaceIds, archivedSessionIds: state.archivedSessionIds })
+    if (!sameIds(state.workspaceIds, workspaceIds)) {
+      await this.setState({ initialized: false, ...restState })
+    }
+    await this.setState({ initialized: true, ...restState })
   }
 
   private validateStoredState(state: WorkspaceDomainState): void {

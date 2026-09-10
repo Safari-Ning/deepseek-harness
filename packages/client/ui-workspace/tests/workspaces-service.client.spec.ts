@@ -71,6 +71,7 @@ function workspaceState(
   return {
     items,
     archivedSessionIds,
+    trashedSessions: [],
     phase,
     state: phase === 'ready' ? 'idle' : 'loading',
     error: null,
@@ -148,6 +149,18 @@ class FakeWorkspaces implements IWorkspaces {
   archiveSession(sessionId: SessionId): Promise<void> {
     this.archiveCalls.push(sessionId)
     return this.onArchive(sessionId)
+  }
+
+  trashSession(_sessionId: SessionId): Promise<void> {
+    return Promise.resolve()
+  }
+
+  restoreSession(_sessionId: SessionId): Promise<void> {
+    return Promise.resolve()
+  }
+
+  emptyTrash(): Promise<number> {
+    return Promise.resolve(0)
   }
 }
 
