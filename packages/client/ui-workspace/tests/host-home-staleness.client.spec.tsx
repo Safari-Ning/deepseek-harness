@@ -51,17 +51,21 @@ async function bench() {
   return { runtime, remote }
 }
 
+/** The single Workspace row: its header plus the always-present Trash header. */
+function workspaceRow(): HTMLElement {
+  const row = screen.getAllByRole('treeitem').find(item => item.textContent?.includes('Project'))!
+  return row.parentElement as HTMLElement
+}
+
 /** Open the Workspace row's hover card, which is where the home abbreviation shows. */
 function openHoverCard(): void {
-  const row = screen.getByRole('treeitem').parentElement as HTMLElement
-  fireEvent.pointerEnter(row)
+  fireEvent.pointerEnter(workspaceRow())
   act(() => { vi.advanceTimersByTime(500) })
 }
 
 /** Close it again, so the next hover rebuilds the card from current props. */
 function closeHoverCard(): void {
-  const row = screen.getByRole('treeitem').parentElement as HTMLElement
-  fireEvent.pointerLeave(row)
+  fireEvent.pointerLeave(workspaceRow())
   act(() => { vi.advanceTimersByTime(500) })
 }
 

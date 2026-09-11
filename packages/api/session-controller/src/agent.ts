@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
-  Agent, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef,
+  Agent, AgentHandle, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -140,11 +140,16 @@ export async function inspectApiSession(
 export class ApiSessionAgentController {
   private readonly resumes = new Map<SessionId, Promise<Agent>>()
   private readonly creations = new Map<SessionId, Promise<Agent>>()
+  private readonly handles = new Map<SessionId, AgentHandle>()
   private readonly selections = new WeakMap<Agent, InstalledSelection>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
   constructor(private readonly ctx: Context) {
+    ctx.on('agent/disposed', ({ agent }) => {
+      const handle = this.handles.get(agent.id)
+      if (handle !== undefined && handle.agent === agent) this.handles.delete(agent.id)
+    })
     ctx.typert.lookups.configure('agent', async (sessionId: SessionId) => {
       const found = await this.resolveAgent(sessionId)
       if ('error' in found) throw found.error
@@ -427,11 +432,11 @@ export class ApiSessionAgentController {
     if (published !== undefined && hasApiSessionSubagentOwner(this.ctx, published, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    return (await this.ctx.agents.resume({
+    return (await this.retainHandle(sessionId, this.ctx.agents.resume({
       resumeSessionId: sessionId,
       agentOptions: this.agentOptions(),
       setup: composition.setup,
-    })).agent
+    }))).agent
   }
 
   private async createOrAdopt(
@@ -459,11 +464,11 @@ export class ApiSessionAgentController {
         const storedPreset = this.presetForObservation(observation)
         this.assertPresetUnchanged(sessionId, presetId, storedPreset)
         const composition = await this.composeAgent(storedPreset)
-        return (await this.ctx.agents.resume({
+        return (await this.retainHandle(sessionId, this.ctx.agents.resume({
           resumeSessionId: sessionId,
           agentOptions: this.agentOptions(),
           setup: composition.setup,
-        })).agent
+        }))).agent
       } catch (error: unknown) {
         if (!(error instanceof SessionQueryError)
           || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
@@ -476,7 +481,7 @@ export class ApiSessionAgentController {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
     const composition = await this.composeAgent(presetId)
-    return (await this.ctx.agents.create({
+    return (await this.retainHandle(sessionId, this.ctx.agents.create({
       sessionId,
       agentOptions: this.agentOptions(),
       meta: {
@@ -484,7 +489,30 @@ export class ApiSessionAgentController {
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
       setup: composition.setup,
-    })).agent
+    }))).agent
+  }
+
+  /**
+   * Dispose the live Agent this controller owns for one Session, if any.
+   * Used when a Session is permanently deleted (trash emptied): disposal
+   * unregisters the Agent, removes its Session from the store, and emits the
+   * paired disposal edges, so no live object resurrects the deleted log.
+   * @param sessionId - Session whose Agent should be retired.
+   * @returns whether a live owned Agent was found and disposed.
+   */
+  async disposeDeletedSessionAgent(sessionId: SessionId): Promise<boolean> {
+    const handle = this.handles.get(sessionId)
+    if (handle === undefined) return false
+    this.handles.delete(sessionId)
+    await handle.dispose()
+    return true
+  }
+
+  /** Retain the teardown capability of one controller-created Agent. */
+  private async retainHandle(sessionId: SessionId, handle: Promise<AgentHandle>): Promise<AgentHandle> {
+    const settled = await handle
+    this.handles.set(sessionId, settled)
+    return settled
   }
 
   private agentOptions(): AgentOptions {

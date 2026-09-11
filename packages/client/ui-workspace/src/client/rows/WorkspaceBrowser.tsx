@@ -465,7 +465,7 @@ function SessionTree({
         role="tree"
         aria-label={t('section.sessions')}
       >
-        {groups.length === 0 && (
+        {groups.every(group => group.key === TRASH_KEY) && (
           <div className={css.empty}>{t('empty.none')}</div>
         )}
         {groups.map((group) => {
@@ -530,7 +530,6 @@ function SessionTree({
             >
               {isTrashGroup ? (
                 <TrashGroupHeader
-                  count={group.sessionCount}
                   expanded={group.expanded}
                   onToggle={() => {
                     if (group.expanded) {
@@ -658,7 +657,7 @@ function SessionTree({
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
   useSessions, useSessionPendingInteraction, open, forkSession, onSessionRename, onSessionArchive, onSessionTrash,
-  archivedSessionIds, usePanelInfo,
+  archivedSessionIds, trashedSessions, usePanelInfo,
   orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder,
   revealSessionId, onSessionRevealed, t,
 }: Pick<
@@ -671,6 +670,7 @@ function FlatList({
   | 'onSessionArchive'
   | 'onSessionTrash'
   | 'archivedSessionIds'
+  | 'trashedSessions'
   | 'usePanelInfo'
   | 'orderBy'
   | 'sessionOrderByAccount'
@@ -685,8 +685,8 @@ function FlatList({
   const list = useSessions(s => s)
   const pendingInteractions = useSessionPendingInteraction(s => s)
   const baseRows = useMemo(
-    () => deriveFlat(list, archivedSessionIds, pendingInteractions),
-    [list, archivedSessionIds, pendingInteractions],
+    () => deriveFlat(list, archivedSessionIds, trashedSessions, pendingInteractions),
+    [list, archivedSessionIds, trashedSessions, pendingInteractions],
   )
   const sessionIds = useMemo(() => baseRows.map(row => row.id), [baseRows])
   const previousOrderBy = useRef(orderBy)
@@ -802,6 +802,7 @@ function SearchResults({
   open,
   workspaces,
   archivedSessionIds,
+  trashedSessions,
   query,
   remote,
   resultLimit,
@@ -810,6 +811,7 @@ function SearchResults({
 }: Pick<SessionTreeProps, 'useSessions' | 'useSessionPendingInteraction' | 'open' | 't' | 'usePanelInfo'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
+  trashedSessions: readonly { readonly sessionId: SessionId }[]
   query: string
   remote: RemoteSearchState
   resultLimit: number
@@ -826,11 +828,12 @@ function SearchResults({
       workspaces,
       query,
       archivedSessionIds,
+      trashedSessions,
       pendingInteractions,
       currentRemote,
       resultLimit,
     ),
-    [list, workspaces, query, archivedSessionIds, pendingInteractions, currentRemote, resultLimit],
+    [list, workspaces, query, archivedSessionIds, trashedSessions, pendingInteractions, currentRemote, resultLimit],
   )
   const pending = currentRemote.status === 'loading'
   const failed = currentRemote.status === 'error'
@@ -1325,6 +1328,7 @@ export function WorkspaceBrowser({
               open={openSearchResult}
               workspaces={workspaces}
               archivedSessionIds={archivedSessionIds}
+              trashedSessions={trashedSessions}
               query={normalizedQuery}
               remote={remoteSearch}
               resultLimit={searchResultLimit}
@@ -1340,6 +1344,7 @@ export function WorkspaceBrowser({
                 onSessionRename={onSessionRename} onSessionArchive={onSessionArchive}
                 onSessionTrash={onSessionTrash}
                 archivedSessionIds={archivedSessionIds}
+                trashedSessions={trashedSessions}
                 orderBy={orderBy}
                 sessionOrderByAccount={sessionOrderByAccount}
                 sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}

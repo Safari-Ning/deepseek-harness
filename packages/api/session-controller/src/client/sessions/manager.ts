@@ -735,6 +735,9 @@ export class SessionManager {
     this.recordMutation(durableSubagent
       ? { kind: 'status', sessionId, running: false }
       : { kind: 'remove', sessionId })
+    // A removed selection points at a Session no longer in the visible corpus;
+    // clear it so the layout falls to the no-session view state.
+    if (!durableSubagent && this.selected === sessionId) this.clearSelection()
     this.updateCatalogActivity(sessionId, false)
     if (durableSubagent) this.sessions.get(sessionId)?.handleRunning(false)
     else this.sessions.get(sessionId)?.handleRemoved()

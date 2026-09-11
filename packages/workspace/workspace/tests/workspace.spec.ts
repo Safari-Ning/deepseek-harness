@@ -1062,7 +1062,7 @@ describe('registry-global session trash', () => {
     expect(result.registry.trashedSessions).toHaveLength(2)
 
     const deleted = await result.registry.emptyTrash()
-    expect(deleted).toBe(2)
+    expect(deleted).toEqual([SessionId('s1'), SessionId('s2')])
     expect(result.registry.trashedSessions).toEqual([])
     expect(persistenceDelete).toHaveBeenCalledWith(SessionId('s1'))
     expect(persistenceDelete).toHaveBeenCalledWith(SessionId('s2'))
@@ -1072,18 +1072,74 @@ describe('registry-global session trash', () => {
     expect(spillDelete).toHaveBeenCalledWith(SessionId('s2'))
   })
 
-  it('emptyTrash skips sessions with active agents', async () => {
-    const dir = await makeDir('empty-trash-active')
+  it('emptyTrash emits workspace/trash-emptied with the deleted identities after committing', async () => {
+    const dir = await makeDir('empty-trash-event')
+    const result = await harness({ sessions: [header('s1', dir, 100), header('s2', dir, 200)] })
+    const persistence = result.ctx.get('sessionPersistence') as never as {
+      delete: () => Promise<void>
+    }
+    persistence.delete = () => Promise.resolve()
+    const emptied: SessionId[][] = []
+    result.ctx.on('workspace/trash-emptied', ({ sessionIds }) => { emptied.push([...sessionIds]) })
+
+    // Nothing deleted: no event.
+    await result.registry.emptyTrash()
+    expect(emptied).toEqual([])
+
+    await result.registry.trashSession(SessionId('s1'))
+    await result.registry.trashSession(SessionId('s2'))
+    await result.registry.emptyTrash()
+    expect(emptied).toEqual([[SessionId('s1'), SessionId('s2')]])
+  })
+
+  it('refuses to trash a session whose agent is running', async () => {
+    const dir = await makeDir('trash-running-agent')
     const result = await harness({ sessions: [header('s1', dir, 100)] })
-    // Provide a mock agents service with one active agent on s1.
+    // Provide a mock agents service with one running agent on s1.
     result.ctx.provide('agents', {
-      list: () => [{ session: { id: SessionId('s1') } }],
+      list: () => [{ session: { id: SessionId('s1') }, status: 'running' }],
     } as never)
 
-    // trashSession checks agents, so it must be provided before trashing.
     await expect(result.registry.trashSession(SessionId('s1')))
-      .rejects.toThrow(/cannot trash session 's1'/)
+      .rejects.toThrow(/cannot trash session 's1': an agent is running on it/)
     expect(result.registry.trashedSessions).toEqual([])
+  })
+
+  it('a live idle agent does not block trashing (the web app keeps opened sessions live)', async () => {
+    const dir = await makeDir('trash-idle-agent')
+    const result = await harness({ sessions: [header('s1', dir, 100)] })
+    result.ctx.provide('agents', {
+      list: () => [{ session: { id: SessionId('s1') }, status: 'idle' }],
+    } as never)
+
+    await result.registry.trashSession(SessionId('s1'))
+    expect(result.registry.trashedSessions).toHaveLength(1)
+  })
+
+  it('emptyTrash deletes a session with a live idle agent and skips one whose agent is running', async () => {
+    const dir = await makeDir('empty-trash-agent-status')
+    const persistenceDelete = vi.fn().mockResolvedValue(undefined)
+    const result = await harness({ sessions: [header('s1', dir, 100), header('s2', dir, 200)] })
+    const persistence = result.ctx.get('sessionPersistence') as never as {
+      delete: typeof persistenceDelete
+    }
+    persistence.delete = persistenceDelete
+
+    await result.registry.trashSession(SessionId('s1'))
+    await result.registry.trashSession(SessionId('s2'))
+    // s1's agent turned running after the trash; s2 keeps a live idle agent.
+    result.ctx.provide('agents', {
+      list: () => [
+        { session: { id: SessionId('s1') }, status: 'running' },
+        { session: { id: SessionId('s2') }, status: 'idle' },
+      ],
+    } as never)
+
+    const deleted = await result.registry.emptyTrash()
+    expect(deleted).toEqual([SessionId('s2')])
+    expect(result.registry.trashedSessions.map(entry => entry.sessionId)).toEqual([SessionId('s1')])
+    expect(persistenceDelete).toHaveBeenCalledExactlyOnceWith(SessionId('s2'))
+    expect(persistenceDelete).not.toHaveBeenCalledWith(SessionId('s1'))
   })
 
   it('trashedSessions survive across registry restart', async () => {

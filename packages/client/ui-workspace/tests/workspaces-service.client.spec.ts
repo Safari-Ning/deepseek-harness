@@ -67,11 +67,12 @@ function workspaceState(
   items: WorkspaceSnapshot['items'] = [],
   archivedSessionIds: readonly SessionId[] = [],
   phase: WorkspaceSnapshot['phase'] = 'ready',
+  trashedSessions: WorkspaceSnapshot['trashedSessions'] = [],
 ): WorkspaceSnapshot {
   return {
     items,
     archivedSessionIds,
-    trashedSessions: [],
+    trashedSessions,
     phase,
     state: phase === 'ready' ? 'idle' : 'loading',
     error: null,
@@ -129,10 +130,18 @@ class FakeSessions {
 class FakeWorkspaces implements IWorkspaces {
   readonly list: MutableSource<WorkspaceSnapshot>
   readonly archiveCalls: SessionId[] = []
+  readonly trashCalls: SessionId[] = []
   onArchive: IWorkspaces['archiveSession'] = async (sessionId) => {
     this.list.update(state => ({
       ...state,
       archivedSessionIds: [...state.archivedSessionIds, sessionId],
+    }))
+  }
+
+  onTrash: IWorkspaces['trashSession'] = async (sessionId) => {
+    this.list.update(state => ({
+      ...state,
+      trashedSessions: [...state.trashedSessions, { sessionId, trashedAt: '2026-01-01T00:00:00.000Z' }],
     }))
   }
 
@@ -151,8 +160,9 @@ class FakeWorkspaces implements IWorkspaces {
     return this.onArchive(sessionId)
   }
 
-  trashSession(_sessionId: SessionId): Promise<void> {
-    return Promise.resolve()
+  trashSession(sessionId: SessionId): Promise<void> {
+    this.trashCalls.push(sessionId)
+    return this.onTrash(sessionId)
   }
 
   restoreSession(_sessionId: SessionId): Promise<void> {
@@ -552,6 +562,49 @@ describe('UiWorkspaceService', () => {
       workspaces: workspaceState([workspace('one', [current.id])], [current.id]),
     })
     expect(archived.sessions.clear).toHaveBeenCalledOnce()
+  })
+
+  it('clears a current Session when it enters the trash baseline', () => {
+    const current = summary('current')
+    const idle = summary('idle')
+    const b = bench({
+      sessions: sessionState([current, idle], current.id),
+      workspaces: workspaceState([workspace('one', [current.id, idle.id])]),
+    })
+
+    b.workspaces.list.update(state => ({
+      ...state,
+      trashedSessions: [{ sessionId: idle.id, trashedAt: '2026-01-01T00:00:00.000Z' }],
+    }))
+    expect(b.sessions.clear).not.toHaveBeenCalled()
+    b.workspaces.list.update(state => ({
+      ...state,
+      trashedSessions: [
+        ...state.trashedSessions,
+        { sessionId: current.id, trashedAt: '2026-01-01T00:00:00.000Z' },
+      ],
+    }))
+    expect(b.sessions.clear).toHaveBeenCalledOnce()
+
+    const trashed = bench({
+      sessions: sessionState([current], current.id),
+      workspaces: workspaceState([workspace('one', [current.id])], [], 'ready', [
+        { sessionId: current.id, trashedAt: '2026-01-01T00:00:00.000Z' },
+      ]),
+    })
+    expect(trashed.sessions.clear).toHaveBeenCalledOnce()
+  })
+
+  it('forwards trash commands and preserves failures', async () => {
+    const idle = sid('idle')
+    const b = bench()
+
+    await b.uiWorkspace.trashSession(idle)
+    expect(b.workspaces.trashCalls).toEqual([idle])
+
+    b.workspaces.onTrash = () => Promise.reject(new Error('trash rejected'))
+    await expect(b.uiWorkspace.trashSession(idle)).rejects.toThrow('trash rejected')
+    expect(b.workspaces.trashCalls).toEqual([idle, idle])
   })
 
   it('forwards archive commands and preserves failures', async () => {

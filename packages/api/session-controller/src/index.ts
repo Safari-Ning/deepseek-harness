@@ -149,6 +149,21 @@ export class SessionController extends TypertRemoteService {
     ctx.on('session/disposed', (session) => {
       ctx.emit('api-session/removed', session.id)
     })
+    ctx.on('workspace/trash-emptied', ({ sessionIds }) => {
+      for (const sessionId of sessionIds) {
+        void this.agents.disposeDeletedSessionAgent(sessionId).then(
+          (disposed) => {
+            // A disposed Agent removes its Session from the store, whose
+            // `session/disposed` listener above already announced the removal.
+            if (!disposed) ctx.emit('api-session/removed', sessionId)
+          },
+          (error: unknown) => {
+            ctx.logger.warn(`api-session: retiring deleted session "${sessionId}" failed: ${String(error)}`)
+            ctx.emit('api-session/removed', sessionId)
+          },
+        )
+      }
+    })
     ctx.on('agent/status', ({ agent, status }) => {
       ctx.emit('api-session/status', agent.id, status === 'running')
     })

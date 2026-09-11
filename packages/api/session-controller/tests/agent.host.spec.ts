@@ -9,6 +9,7 @@ import SessionStore, { SESSION_FORMAT_VERSION, SessionLogOffset, SessionId } fro
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiSessionAgentController,
@@ -18,7 +19,7 @@ import {
   inspectApiSession,
 } from '../src/agent.ts'
 import { installModelSelectionProjection } from '../src/model-selection-projection.ts'
-import { installSessionReadTestServices, testSessionPersistence } from './test-remote.ts'
+import { createSessionTestRemote, installSessionReadTestServices, testSessionPersistence } from './test-remote.ts'
 
 const roots: Context[] = []
 
@@ -451,5 +452,46 @@ describe('ApiSession create or adoption', () => {
     writeFileSync(file, 'not a directory')
     await expect(agents.ensureSession(SessionId('mkdir-failure'), join(file, 'child'), false))
       .rejects.toThrow('failed to ensure project directory')
+  })
+})
+
+describe('deleted-session retirement', () => {
+  /** Full-controller harness over a production loop, so created agents are controller-owned. */
+  async function controllerHarness(): Promise<ReturnType<typeof createSessionTestRemote>> {
+    const ctx = new Context()
+    roots.push(ctx)
+    await mountAgentLoopTestDependencies(ctx)
+    await mountAgentLoopTestHarness(ctx)
+    return createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
+      cwd: '/tmp',
+    })
+  }
+
+  it('reports no live agent for a cold deleted session', async () => {
+    const { agents } = await harness()
+    await expect(agents.disposeDeletedSessionAgent(SessionId('deleted-cold'))).resolves.toBe(false)
+  })
+
+  it('disposes the live agent and announces removals for every deleted identity', async () => {
+    const remote = await controllerHarness()
+    const ctx = roots.at(-1)!
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-trash-emptied-'))
+    tempDirs.push(dir)
+    const created = await remote.create({ sessionId: SessionId('deleted-live'), cwd: dir })
+    if (!created.ok) throw created.error
+    const liveId = created.value.sessionId
+    expect(ctx.agents.get(liveId)).toBeDefined()
+    expect(ctx.sessions.get(liveId)).toBeDefined()
+
+    const removed: SessionId[] = []
+    ctx.on('api-session/removed', (sessionId) => { removed.push(sessionId) })
+
+    ctx.emit('workspace/trash-emptied', { sessionIds: [liveId, SessionId('deleted-cold')] })
+    await vi.waitFor(() => { expect(removed).toHaveLength(2) })
+    expect(ctx.agents.get(liveId)).toBeUndefined()
+    expect(ctx.sessions.get(liveId)).toBeUndefined()
+    expect(removed).toContain(liveId)
+    expect(removed).toContain(SessionId('deleted-cold'))
   })
 })

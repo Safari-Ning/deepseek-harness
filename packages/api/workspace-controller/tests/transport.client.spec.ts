@@ -337,7 +337,7 @@ describe('WorkspaceController', () => {
     expect(mock.log.requests('workspace/archiveSession')).toEqual([{ sessionId: 'session' }])
     expect(mock.log.requests('workspace/trashSession')).toEqual([{ sessionId: 'session' }])
     expect(mock.log.requests('workspace/restoreSession')).toEqual([{ sessionId: 'session' }])
-    expect(mock.log.requests('workspace/emptyTrash')).toEqual([{}])
+    expect(mock.log.requests('workspace/emptyTrash')).toEqual([undefined])
     expect(mock.log.requests('workspace/delete')).toEqual([{ workspaceId: 'one' }])
   })
 

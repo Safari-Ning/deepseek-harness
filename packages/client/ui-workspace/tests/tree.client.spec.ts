@@ -54,7 +54,7 @@ describe('deriveGroups', () => {
     const sessions = list(summary('newer', 20), summary('older', 10))
     const workspaces = [workspace('first', ['older', 'newer']), workspace('empty', [])]
     const groups = deriveGroups(sessions, workspaces, noArchive, noTrash, noAttention, view(['first']))
-    expect(groups.map(group => group.key)).toEqual(['first', 'empty'])
+    expect(groups.map(group => group.key)).toEqual(['first', 'empty', '__trash__'])
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([sid('older'), sid('newer')])
   })
 
@@ -69,7 +69,7 @@ describe('deriveGroups', () => {
       sessions, [workspace('project', ['awaiting'])], noArchive, noTrash, attention, view(['project']),
     )
     expect(grouped[0]!.sessions[0]).toMatchObject({ pendingInteraction: 'plan-review', running: true })
-    expect(deriveFlat(sessions, noArchive, attention)[0])
+    expect(deriveFlat(sessions, noArchive, noTrash, attention)[0])
       .toMatchObject({ pendingInteraction: 'plan-review', running: true })
   })
 
@@ -82,7 +82,7 @@ describe('deriveGroups', () => {
         { key: `${kind}:1`, kind, sessionId: awaiting.id },
       ]])
 
-      expect(deriveFlat(list(awaiting), noArchive, attention)[0]?.pendingInteraction).toBe(kind)
+      expect(deriveFlat(list(awaiting), noArchive, noTrash, attention)[0]?.pendingInteraction).toBe(kind)
     },
   )
 
@@ -91,7 +91,7 @@ describe('deriveGroups', () => {
     const groups = deriveGroups(
       sessions, [workspace('first', ['owned'])], noArchive, noTrash, noAttention, view([UNGROUPED_KEY]),
     )
-    expect(groups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
+    expect(groups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY, '__trash__'])
     expect(groups[1]!.sessions.map(session => session.id)).toEqual([sid('loose')])
   })
 
@@ -135,7 +135,7 @@ describe('deriveGroups', () => {
       list({ ...summary('stray', 2), blank: true }),
       [workspace('first', [])], noArchive, noTrash, noAttention, view(),
     )
-    expect(strayGroups.map(group => group.key)).toEqual(['first'])
+    expect(strayGroups.map(group => group.key)).toEqual(['first', '__trash__'])
   })
 
   it('projects the completion reminder into session and search rows (absent = false)', () => {
@@ -149,9 +149,9 @@ describe('deriveGroups', () => {
     const plainNode = groups[0]!.sessions.find(session => session.id === plain.id)!
     expect(doneNode.completed).toBe(true)
     expect(plainNode.completed).toBe(false)
-    expect(deriveFlat(sessions, noArchive, noAttention).find(node => node.id === done.id)!.completed).toBe(true)
+    expect(deriveFlat(sessions, noArchive, noTrash, noAttention).find(node => node.id === done.id)!.completed).toBe(true)
     const search = deriveSearchResults(
-      sessions, [workspace('first', ['done', 'plain'])], 'done', noArchive,
+      sessions, [workspace('first', ['done', 'plain'])], 'done', noArchive, noTrash,
       noAttention, { items: [], hasMore: false }, 10,
     )
     expect(search.items[0]?.completed).toBe(true)
@@ -180,10 +180,10 @@ describe('deriveGroups', () => {
     expect(deriveGroups(
       sessions, workspaces, noArchive, noTrash, noAttention, view(['project']),
     )[0]!.sessions.map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
-    expect(deriveFlat(sessions, noArchive, noAttention)
+    expect(deriveFlat(sessions, noArchive, noTrash, noAttention)
       .map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
     expect(deriveSearchResults(
-      sessions, workspaces, 'project', noArchive, noAttention, { items: [], hasMore: false }, 10,
+      sessions, workspaces, 'project', noArchive, noTrash, noAttention, { items: [], hasMore: false }, 10,
     ).items.map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
   })
 
@@ -213,11 +213,11 @@ describe('deriveGroups', () => {
     expect(groups[0]!.sessionCount).toBe(2)
     expect(groups[0]!.sessions[0]).toMatchObject({ running: false, runningSubagentCount: 2 })
     expect(groups[0]!.sessions[1]).toMatchObject({ running: false, runningSubagentCount: 1 })
-    expect(deriveFlat(sessions, noArchive, noAttention).map(node => [node.id, node.runningSubagentCount])).toEqual([
+    expect(deriveFlat(sessions, noArchive, noTrash, noAttention).map(node => [node.id, node.runningSubagentCount])).toEqual([
       [fork.id, 1], [parent.id, 2],
     ])
     expect(deriveSearchResults(
-      sessions, [workspace('first', ['parent', 'fork'])], 'parent', noArchive,
+      sessions, [workspace('first', ['parent', 'fork'])], 'parent', noArchive, noTrash,
       noAttention, { items: [], hasMore: false }, 10,
     ).items[0]).toMatchObject({ id: parent.id, runningSubagentCount: 2 })
   })
@@ -241,7 +241,7 @@ describe('deriveGroups', () => {
       { expandedGroups: [UNGROUPED_KEY] },
     )
 
-    expect(groups).toHaveLength(1)
+    expect(groups).toHaveLength(2)
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([
       newChild.id, tieA.id, tieB.id, oldChild.id,
       cycleB.id, cycleA.id, orphan.id, self.id, parent.id,
@@ -276,8 +276,9 @@ describe('deriveGroups', () => {
       noTrash, noAttention, view(['first', UNGROUPED_KEY]),
     )
     // The archived member drops from its group AND the archived stray never
-    // surfaces an Ungrouped bucket; counts follow the visible rows.
-    expect(groups.map(group => group.key)).toEqual(['first'])
+    // surfaces an Ungrouped bucket; counts follow the visible rows. The Trash
+    // group stays as the sole trailing section.
+    expect(groups.map(group => group.key)).toEqual(['first', '__trash__'])
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([kept.id])
     expect(groups[0]!.sessionCount).toBe(1)
   })
@@ -309,12 +310,33 @@ describe('deriveGroups', () => {
     expect(groups.at(-1)!.containsCurrent).toBe(false)
   })
 
-  it('omits the trash group when trashedSessions is empty', () => {
+  it('always shows the trash group, empty when trashedSessions is empty', () => {
     const groups = deriveGroups(
       list(summary('a', 1)), [workspace('ws', ['a'])],
       noArchive, noTrash, noAttention, view(),
     )
-    expect(groups.some(g => g.key === '__trash__')).toBe(false)
+    const trash = groups.at(-1)!
+    expect(trash.key).toBe('__trash__')
+    expect(trash.sessionCount).toBe(0)
+    expect(trash.sessions).toEqual([])
+    expect(trash.workspaceId).toBeUndefined()
+    expect(trash.containsCurrent).toBe(false)
+  })
+
+  it('hides trashed sessions from workspace and Ungrouped groups', () => {
+    const owned = summary('owned', 1)
+    const loose = summary('loose', 9)
+    const sessions = list(owned, loose)
+    const groups = deriveGroups(
+      sessions,
+      [workspace('first', ['owned'])],
+      noArchive,
+      [{ sessionId: sid('owned') }, { sessionId: sid('loose') }],
+      noAttention,
+      view([UNGROUPED_KEY]),
+    )
+    expect(groups.map(group => group.key)).toEqual(['first', '__trash__'])
+    expect(groups[0]!.sessions).toEqual([])
   })
 
   it('sorts trashed sessions by recency (newest first)', () => {
@@ -376,7 +398,7 @@ describe('deriveFlat', () => {
     const child = { ...summary('child', 30), parentId: parent.id }
     const tieB = summary('tie-b', 20)
     const tieA = summary('tie-a', 20)
-    const rows = deriveFlat(list(parent, child, tieB, tieA), noArchive, noAttention)
+    const rows = deriveFlat(list(parent, child, tieB, tieA), noArchive, noTrash, noAttention)
     expect(rows.map(row => row.id)).toEqual([sid('child'), sid('tie-a'), sid('tie-b'), sid('parent')])
   })
 
@@ -387,6 +409,7 @@ describe('deriveFlat', () => {
     const rows = deriveFlat(
       { ...list(parent, fork, subagent), current: subagent.id },
       noArchive,
+      noTrash,
       noAttention,
     )
     expect(rows.map(row => row.id)).toEqual([fork.id, parent.id])
@@ -394,7 +417,7 @@ describe('deriveFlat', () => {
 
   it('tolerates ids whose summary has not landed yet', () => {
     const partial: SessionListState = { ...list(summary('present', 1)), ids: [sid('ghost'), sid('present')] }
-    expect(deriveFlat(partial, noArchive, noAttention).map(row => row.id)).toEqual([sid('present')])
+    expect(deriveFlat(partial, noArchive, noTrash, noAttention).map(row => row.id)).toEqual([sid('present')])
   })
 
   it('shows only the current blank session and excludes blanks from search', () => {
@@ -404,7 +427,7 @@ describe('deriveFlat', () => {
       ...list(summary('real', 1), currentBlank, staleBlank),
       current: currentBlank.id,
     }
-    const rows = deriveFlat(sessions, noArchive, noAttention)
+    const rows = deriveFlat(sessions, noArchive, noTrash, noAttention)
     expect(rows.map(row => row.id)).toEqual([currentBlank.id, sid('real')])
     expect(rows.map(row => row.title)).toEqual(['', 'real'])
     expect(rows.map(row => row.blank)).toEqual([true, false])
@@ -413,7 +436,15 @@ describe('deriveFlat', () => {
   it('hides archived sessions in flat mode', () => {
     const kept = summary('kept', 1)
     const gone = summary('gone', 2)
-    expect(deriveFlat(list(kept, gone), archived('gone'), noAttention).map(row => row.id)).toEqual([kept.id])
+    expect(deriveFlat(list(kept, gone), archived('gone'), noTrash, noAttention).map(row => row.id)).toEqual([kept.id])
+  })
+
+  it('hides trashed sessions in flat mode', () => {
+    const kept = summary('kept', 1)
+    const gone = summary('gone', 2)
+    expect(
+      deriveFlat(list(kept, gone), noArchive, [{ sessionId: gone.id }], noAttention).map(row => row.id),
+    ).toEqual([kept.id])
   })
 })
 
@@ -428,6 +459,25 @@ describe('deriveSearchResults archive filtering', () => {
       [],
       'needle',
       archived('gone'),
+      noTrash,
+      noAttention,
+      { items: [{ sessionId: gone.id, snippet: 'needle body' }], hasMore: false },
+      10,
+    )
+    expect(result.items.map(item => item.id)).toEqual([hit.id])
+  })
+
+  it('trashed sessions never match — not by title and not via a backend content hit', () => {
+    const hit = summary('hit', 2)
+    hit.displayTitle = 'Needle row'
+    const gone = summary('gone', 1)
+    gone.displayTitle = 'Needle trashed'
+    const result = deriveSearchResults(
+      list(hit, gone),
+      [],
+      'needle',
+      noArchive,
+      [{ sessionId: gone.id }],
       noAttention,
       { items: [{ sessionId: gone.id, snippet: 'needle body' }], hasMore: false },
       10,
@@ -453,6 +503,7 @@ describe('deriveSearchResults', () => {
       ],
       ' NEEDLE ',
       noArchive,
+      noTrash,
       new Map([[titleHit.id, {
         key: 'question:1', kind: 'plan-review', sessionId: titleHit.id,
       }]]),
@@ -519,6 +570,7 @@ describe('deriveSearchResults', () => {
       [workspace('first', ['opaque-current', 'new session stale'])],
       'new session',
       noArchive,
+      noTrash,
       noAttention,
       {
         items: [
@@ -543,6 +595,7 @@ describe('deriveSearchResults', () => {
       [],
       'needle',
       noArchive,
+      noTrash,
       noAttention,
       { items: [], hasMore: false },
       3,
@@ -555,13 +608,14 @@ describe('deriveSearchResults', () => {
       [],
       'needle',
       noArchive,
+      noTrash,
       noAttention,
       { items: [{ sessionId: sid('body'), snippet: 'needle' }], hasMore: true },
       3,
     )
     expect(backendMore.items).toHaveLength(1)
     expect(backendMore.hasMore).toBe(true)
-    expect(deriveSearchResults(list(), [], '  ', noArchive, noAttention, { items: [], hasMore: true }, 3))
+    expect(deriveSearchResults(list(), [], '  ', noArchive, noTrash, noAttention, { items: [], hasMore: true }, 3))
       .toEqual({ items: [], hasMore: false })
   })
 })

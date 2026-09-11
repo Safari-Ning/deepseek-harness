@@ -12,6 +12,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { afterEach, describe, expect, vi, type MockInstance } from 'vitest'
 import { ClientSessions } from '../src/client/sessions/service.ts'
 import type { SessionListValue } from '../src/types.ts'
+import { FOLLOW, followScript } from './remote/session.client.ts'
 
 const SELF = '@deepseek-ai/dsh-api-session-controller'
 const ROSTER = webApp.closure([SELF])
@@ -64,8 +65,16 @@ describe('Session Controller Client apply', () => {
     })
     expect(error).toHaveBeenCalledWith(sid('session-1'), 'agent failed')
 
+    // Selecting the session opens its follow stream and materializes its Agent scopes.
+    mock.stream(FOLLOW, followScript(ok({ records: [], hasMore: false })))
+    mock.remote.subagents.list.mockResolvedValue(ok({ entries: [], parentAvailable: true }))
+    sessions.open(sid('session-1'))
+    expect(sessions.list.getSnapshot().current).toBe(sid('session-1'))
+
     await emit(mock, 'api-session/removed', sid('session-1'))
     await vi.waitFor(() => { expect(sessions.list.getSnapshot().byId[sid('session-1')]).toBeUndefined() })
+    // Removing the selected session clears the selection (trash emptied).
+    expect(sessions.list.getSnapshot().current).toBeUndefined()
 
     client.connection.reconnect()
     await mock.streams.opened(EVENTS, 2)

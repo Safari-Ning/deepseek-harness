@@ -81,6 +81,19 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     workspaceRegistry: WorkspaceRegistry
   }
+
+  interface Events {
+    /**
+     * The registry permanently deleted trashed sessions and their derived
+     * artifacts (session logs, projection cache rows, spill files). Emitted
+     * once per emptying trash, strictly after the trash state commits, with
+     * the deleted identities in trash order. Live-session retirement and
+     * connected-client notification are listener responsibilities.
+     * @param payload - the permanently deleted Session identities.
+     * @mode emit
+     */
+    'workspace/trash-emptied'(payload: { readonly sessionIds: readonly SessionId[] }): void
+  }
 }
 
 interface BootstrapGroup {
@@ -291,12 +304,13 @@ export class WorkspaceRegistry extends Service {
     return this.enqueueOperation(async () => {
       const state = this.requireState()
       if (state.trashedSessions.some(entry => entry.sessionId === sessionId)) return
-      // Refuse to trash a session with an active agent.
+      // Refuse to trash a session whose agent is running; a live idle agent
+      // (the web app keeps every opened session live) must not block trash.
       const agents = this.ctx.get('agents')
       if (agents !== undefined) {
         for (const agent of agents.list()) {
-          if (agent.session.id === sessionId) {
-            throw new Error(`cannot trash session '${sessionId}': an agent is still active on it`)
+          if (agent.session.id === sessionId && agent.status === 'running') {
+            throw new Error(`cannot trash session '${sessionId}': an agent is running on it`)
           }
         }
       }
@@ -356,35 +370,38 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
-   * Permanently delete every trashed session: their session logs, projection
-   * cache rows, and spill artifacts. After completion the trash set is empty.
-   * Sessions that are live (running) are skipped; their entries remain in the
-   * trash for a subsequent attempt. Attachment GC is not performed here —
-   * callers with access to the attachment store should perform attachment
-   * garbage collection before or after calling this method.
-   * @returns the number of sessions permanently deleted.
+   * Permanently delete every deletable trashed session: their session logs,
+   * projection cache rows, and spill artifacts. Only entries whose agent is
+   * running are skipped; their entries remain in the trash for a subsequent
+   * attempt. After the trash state commits, `workspace/trash-emptied` carries
+   * the deleted identities so listeners can retire live sessions and notify
+   * connected clients. Attachment GC is not performed here — callers with
+   * access to the attachment store should perform attachment garbage
+   * collection before or after calling this method.
+   * @returns the identities of the sessions permanently deleted, in trash order.
    */
-  emptyTrash(): Promise<number> {
+  emptyTrash(): Promise<SessionId[]> {
     return this.enqueueOperation(async () => {
       const state = this.requireState()
       const remaining: TrashEntry[] = []
-      let deleted = 0
+      const deleted: SessionId[] = []
       const persistence = this.ctx.get('sessionPersistence')
       const projectionCache = this.ctx.get('sessionProjectionCache')
       const spillStore = this.ctx.get('spillStore')
       for (const entry of state.trashedSessions) {
-        // Skip sessions with active agents.
+        // Skip sessions whose agent is running; a live idle agent holds no
+        // write claim or open log handle, so its session deletes cleanly.
         const agents = this.ctx.get('agents')
-        let isActive = false
+        let isRunning = false
         if (agents !== undefined) {
           for (const agent of agents.list()) {
-            if (agent.session.id === entry.sessionId) {
-              isActive = true
+            if (agent.session.id === entry.sessionId && agent.status === 'running') {
+              isRunning = true
               break
             }
           }
         }
-        if (isActive) {
+        if (isRunning) {
           remaining.push(entry as TrashEntry)
           continue
         }
@@ -392,7 +409,7 @@ export class WorkspaceRegistry extends Service {
           if (persistence !== undefined) await persistence.delete(entry.sessionId)
           if (projectionCache !== undefined) await projectionCache.deleteSession(entry.sessionId)
           if (spillStore !== undefined) await spillStore.deleteSession(entry.sessionId)
-          deleted++
+          deleted.push(entry.sessionId)
         } catch (error) {
           this.ctx.logger.warn(
             `failed to permanently delete trashed session '${entry.sessionId}': ${String(error)}`,
@@ -400,8 +417,9 @@ export class WorkspaceRegistry extends Service {
           remaining.push(entry as TrashEntry)
         }
       }
-      if (deleted > 0) {
+      if (deleted.length > 0) {
         await this.setState({ ...this.requireState(), trashedSessions: remaining })
+        this.ctx.emit('workspace/trash-emptied', { sessionIds: [...deleted] })
       }
       return deleted
     })

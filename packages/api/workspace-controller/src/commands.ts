@@ -200,16 +200,16 @@ export class WorkspaceCommands {
   async emptyTrash(): Promise<WorkspaceEmptyTrashValue> {
     // Collect remaining session IDs before deletion (trashed sessions are not in workspaces).
     const remainingSessionIds = collectRemainingSessionIds(this.ctx.workspaceRegistry)
-    const deleted = await this.ctx.workspaceRegistry.emptyTrash()
+    const deletedSessionIds = await this.ctx.workspaceRegistry.emptyTrash()
     // Perform attachment GC if the attachment service is available.
-    if (deleted > 0) {
+    if (deletedSessionIds.length > 0) {
       const attachments = this.ctx.get('attachments')
       if (attachments !== undefined) {
         const keep = await collectAttachmentRefs(this.ctx, remainingSessionIds)
         await attachments.deleteUnreferenced(keep)
       }
     }
-    return { deleted }
+    return { deleted: deletedSessionIds.length }
   }
 
   private requireWorkspace(workspaceId: WorkspaceId): Workspace {

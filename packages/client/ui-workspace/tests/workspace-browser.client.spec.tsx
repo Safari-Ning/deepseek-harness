@@ -152,7 +152,7 @@ describe('WorkspaceBrowser', () => {
         }])),
         useHostInfo: selector => selector({ home: '/home/u', isLoopback: true }),
       })
-      fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
+      fireEvent.pointerEnter(screen.getAllByRole('treeitem').find(item => item.textContent?.includes('Project'))!.parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(500) })
       expect(screen.getByText('~/Documents/project')).toBeTruthy()
     } finally {
@@ -1249,7 +1249,7 @@ describe('WorkspaceBrowser', () => {
       insertSessionBefore,
     })
     expect(restored.store.getSnapshot().sessionOrderByAccount[UNGROUPED_KEY]).toEqual(['two', 'three', 'one'])
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.textContent)).toEqual([
+    expect(screen.getAllByRole('treeitem').slice(1, -1).map(row => row.textContent)).toEqual([
       expect.stringContaining('two'),
       expect.stringContaining('three'),
       expect.stringContaining('one'),
@@ -1514,15 +1514,14 @@ describe('WorkspaceBrowser', () => {
         )),
       })
       expect(screen.getByText('回收站')).toBeTruthy()
-      expect(screen.getByText('1')).toBeTruthy()
     })
 
-    it('does not render a trash group when trashedSessions is empty', () => {
+    it('renders the trash group even when trashedSessions is empty', () => {
       mount({
         useSessions: hook(sessionState([summary('active', 10)])),
         useWorkspaces: hook(workspaceState([workspace('ws', ['active'])])),
       })
-      expect(screen.queryByText('回收站')).toBeNull()
+      expect(screen.getByText('回收站')).toBeTruthy()
     })
 
     it('restores a session when the restore button is clicked', async () => {
