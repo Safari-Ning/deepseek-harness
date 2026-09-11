@@ -517,12 +517,10 @@ export function SessionNodeItem({
 }
 
 /**
- * Trash group header: title + session count badge + empty-trash action.
+ * Trash group header: title + empty-trash action.
  * The trash group has no workspace backing; its label comes from the locale.
  */
-export function TrashGroupHeader({ count, onEmptyTrash, onToggle, expanded, t }: {
-  /** Number of trashed sessions. */
-  count: number
+export function TrashGroupHeader({ onEmptyTrash, onToggle, expanded, t }: {
   /** Permanently delete all trashed sessions. */
   onEmptyTrash: () => void
   /** Expand/collapse the trash group. */
@@ -546,7 +544,6 @@ export function TrashGroupHeader({ count, onEmptyTrash, onToggle, expanded, t }:
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{t('trash.title')}</span>
-        <span className={css.sessionCount}>{count}</span>
       </span>
       <span className={css.rowActions}>
         <button
@@ -585,8 +582,8 @@ export function TrashSessionRow({ node, now, onRestore, onOpen, t }: {
       <span className={clsx(css.slot, css.status)}>
         <SessionStatusDots statuses={[{ state: 'done', label: '' }]} />
       </span>
-      <span className={css.sessionTitle}>{title}</span>
-      <span className={css.sessionTime}>{timeAgo}</span>
+      <span className={css.title}>{title}</span>
+      <span className={css.time}>{timeAgo}</span>
       <span className={css.rowActions}>
         <button
           type="button"

@@ -353,6 +353,15 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* Trash session row: always show both time and restore icon. */
+.trashSessionRow .rowActions {
+  display: inline-flex;
+}
+
+.trashSessionRow .time {
+  display: inline;
+}
+
 /* Chevrons ride the caption grey (#ADB2B8); the folder glyph stays one step
    darker (tertiary, #81858C) per the cell spec. */
 .chevron {
